@@ -1,0 +1,49 @@
+Clone the FreeRDP repo by running the following command: git clone https://github.com/FreeRDP/FreeRDP.git/
+
+Download and install full 32- and 64-bit versions of OpenSSL using the following links:
+
+    https://slproweb.com/download/Win32OpenSSL-1_1_0f.exe
+    https://slproweb.com/download/Win64OpenSSL-1_1_0f.exe
+
+
+Download and install CMake using the following link: https://cmake.org/files/v3.9/cmake-3.9.0-win64-x64.msi
+
+NOTE: Version 1.1.0+ of OpenSSL changed library names:
+
+    libeay32.dll -^> libcrypto.dll
+    ssleay32.dll -^> libssl.dll
+
+You may need to replace references to libeay32 and ssleay32 with libcrypto32 and libssl32, respectively, in the following file:
+
+    FreeRDP\cmake\FindOpenSSL.cmake
+
+Check and update FreeRDP\cmake\FindOpenSSL.cmake if necessary before proceeding
+
+Navigate to your local copy of the FreeRDP repo and execute the following command to build the FreeRDP Visual Studio solution:
+
+    cmake .
+
+NOTE: cmake will build the solution files required to compile FreeRDP for Windows; however, the solution files are not portable, and contain references to the absolute location of FreeRDP project files
+
+Import the Bridge project into the newly created solution. The Bridge project is in /Bridge.
+
+Change the following project dependencies:
+
+    ALL_BUILD -> select Bridge
+    Bridge -> select freerdp, freerdp-client, winpr
+
+Compile FreeRDP for Windows using the following command:
+
+    msbuild FreeRDP.sln /p:Configuration=(Debug or Release) /M
+
+To test (unverified):
+Transfer the following OpenSSL libraries to FreeRDP\Debug:
+
+    C:\OpenSSL-Win32\bin\libcrypto-1_1.dll
+    C:\OpenSSL-Win32\bin\libssl-1_1.dll
+    C:\OpenSSL-Win64\bin\libcrypto-1_1-x64.dll
+    C:\OpenSSL-Win64\bin\libssl-1_1-x64.dll
+
+Launch the RDP client with connection parameters using the following command syntax:
+
+    wfreerdp.exe /v:^<HOSTNAME^> /port:^<PORT^> /u:^<USERNAME^> /d:^<DOMAIN^> /p:^<PASSWORD^>
