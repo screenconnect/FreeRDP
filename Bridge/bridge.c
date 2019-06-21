@@ -1,10 +1,8 @@
-#pragma comment(lib,  "ws2_32.lib") 
+#pragma comment(lib,  "ws2_32.lib")
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
-
 #include <assert.h>
-
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/gdi/bitmap.h>
 #include <freerdp/freerdp.h>
@@ -18,9 +16,10 @@ static BOOL bridge_pointer_set(rdpContext*, const rdpPointer*);
 static BOOL bridge_pointer_set_null(rdpContext*);
 static BOOL bridge_pointer_set_default(rdpContext*);
 static BOOL bridge_pointer_set_position(rdpContext*, UINT32, UINT32);
+static BOOL bridge_begin_paint(rdpContext* context);
+static BOOL bridge_end_paint(rdpContext* context);
 
 freerdp* initiate_bridge_connect(char*, int, char*, char*, char*, UINT32, UINT32);
-static BOOL bridge_gdi_memblt(rdpContext*, MEMBLT_ORDER*);
 __declspec(dllexport) void* __cdecl bridge_create_freerdp_connection(char*, char*, int, char*, char*, UINT32, UINT32);
 __declspec(dllexport) bridgeContext __cdecl bridge_try_get_update(void*);
 __declspec(dllexport) bridgeContext __cdecl bridge_get_current_context(void*);
@@ -58,7 +57,6 @@ struct bridge_context
 //   pass (0,0) for width, height to use default settings (1024,768)
 void* bridge_create_freerdp_connection(char* hostname, char* domain, int port, char* user, char* password, UINT32 desktopWidth, UINT32 desktopHeight)
 {
-
 	freerdp* instance = initiate_bridge_connect(hostname, port, domain, user, password, desktopWidth, desktopHeight);
 	return instance;
 }
@@ -122,7 +120,6 @@ bridgeContext bridge_get_current_context(void* inst)
 	bridgeContext* bc = (bridgeContext*)context;
 
 	return *bc;
-
 }
 
 BOOL bridge_freerdp_send_keyboard_event(void* inst, UINT32 scancode, BOOL isDown, BOOL isExtended)
@@ -180,7 +177,9 @@ BOOL bridge_freerdp_connection_possible(char* hostname, char* domain, int port, 
 	bridgeRdpInstance->settings->Username = _strdup(username);
 	bridgeRdpInstance->settings->Domain = _strdup(domain);
 	bridgeRdpInstance->settings->Password = _strdup(password);
-	bridgeRdpInstance->settings->AsyncTransport = FALSE;
+	bridgeRdpInstance->settings->AsyncUpdate = TRUE;
+	bridgeRdpInstance->settings->AsyncInput = TRUE;
+
 	bridgeRdpInstance->ContextSize = sizeof(bridgeContext);
 
 	if (!freerdp_context_new(bridgeRdpInstance) || !freerdp_connect(bridgeRdpInstance))
@@ -316,7 +315,6 @@ BOOL bridge_cleanup(void* inst, BOOL shouldWSACleanup)
 //	return 0;
 //}
 
-
 freerdp* initiate_bridge_connect(char* hostname, int port, char* domain, char* username, char* password, UINT32 desktopWidth, UINT32 desktopHeight)
 {
 	WSADATA dummyWsaData;
@@ -349,11 +347,13 @@ freerdp* initiate_bridge_connect(char* hostname, int port, char* domain, char* u
 	if (desktopHeight > 0)
 		bridgeRdpInstance->settings->DesktopHeight = desktopHeight;
 
-	bridgeRdpInstance->settings->AsyncTransport = FALSE;
+	bridgeRdpInstance->settings->AsyncInput = TRUE;
+	bridgeRdpInstance->settings->AsyncUpdate = TRUE;
 
 	// Set ContextSize on bridgeRdpInstance to sizeof(bridgeContext) before calling freerdp_context_new
 	//  this will allocate memory for bridgeContext, which is a superset of plain jane rdpContext
 	bridgeRdpInstance->ContextSize = sizeof(bridgeContext);
+	bridgeRdpInstance->settings->ColorDepth = 32;
 
 	if (!freerdp_context_new(bridgeRdpInstance) || !freerdp_connect(bridgeRdpInstance))
 		goto fail;
@@ -370,9 +370,8 @@ freerdp* initiate_bridge_connect(char* hostname, int port, char* domain, char* u
 	//if (!bridge_register_pointer(bridgeRdpInstance->context->graphics))
 	//	goto fail;
 
-	// here we want to reassign context->update->primary->MemBlt to our own thing
-	// prior to reassignment, MemBlt points to static BOOL update_gdi_memblt(rdpContext* context, MEMBLT_ORDER* memblt)
-	bridgeRdpContext->update->primary->MemBlt = bridge_gdi_memblt;
+	bridgeRdpContext->update->BeginPaint = bridge_begin_paint;
+	bridgeRdpContext->update->EndPaint = bridge_end_paint;
 	bitmap_cache_register_callbacks(bridgeRdpContext->update);
 
 	// bridge context should have reference to the current bitmap
@@ -413,7 +412,7 @@ static BOOL bridge_register_pointer(rdpGraphics* graphics)
 }
 
 // Cursor capturing will be a rev 2 feature
-// with this, we want to update the bridgeContext with new ICONINFO info data to be processed as a custom cursor in CursorCapturer 
+// with this, we want to update the bridgeContext with new ICONINFO info data to be processed as a custom cursor in CursorCapturer
 static BOOL bridge_pointer_new(rdpContext* context, const rdpPointer* pointer)
 {
 	ICONINFO info;
@@ -460,9 +459,9 @@ static BOOL bridge_pointer_new(rdpContext* context, const rdpPointer* pointer)
 		if (!pdata)
 			goto fail;
 
-		if (!freerdp_image_copy_from_pointer_data(pdata, gdi->dstFormat, 0, 0, 0,
+		if (!freerdp_image_copy_from_pointer_data(pdata, gdi->dstFormat, 0, 0, 0, 
 			pointer->width, pointer->height,
-			pointer->xorMaskData, pointer->lengthXorMask,
+			pointer->xorMaskData, pointer->lengthXorMask, 
 			pointer->andMaskData, pointer->lengthAndMask, pointer->xorBpp, &gdi->palette))
 		{
 			_aligned_free(pdata);
@@ -546,25 +545,66 @@ static BOOL flip_bitmap(const BYTE* src, BYTE* dst, UINT32 scanline, UINT32 nHei
 	return TRUE;
 }
 
-static BOOL bridge_gdi_memblt(rdpContext* context, MEMBLT_ORDER* memblt)
+static BOOL bridge_begin_paint(rdpContext* context)
 {
-	// here we want to cast context as bridgeContext to update our custom fields with MEMBLT_ORDER details
+	HGDI_DC hdc;
 	bridgeContext* bc = (bridgeContext*)context;
 
-	gdiBitmap* bitmap;
-	rdpGdi* gdi;
-
-	if (!context || !memblt || !context->gdi || !memblt->bitmap)
+	if (!context || !context->gdi || !context->gdi->primary || !context->gdi->primary->hdc)
 		return FALSE;
 
-	bitmap = (gdiBitmap*)memblt->bitmap;
-	gdi = context->gdi;
+	hdc = context->gdi->primary->hdc;
+
+	if (!hdc || !hdc->hwnd || !hdc->hwnd->invalid)
+		return FALSE;
+
+	hdc->hwnd->invalid->null = TRUE;
+	hdc->hwnd->ninvalid = 0;
 
 	if (!bc->updatesReceived)
 		bc->updatesReceived = TRUE;
 
-	return gdi_BitBlt(gdi->drawing->hdc, memblt->nLeftRect, memblt->nTopRect,
-		memblt->nWidth, memblt->nHeight, bitmap->hdc,
-		memblt->nXSrc, memblt->nYSrc, gdi_rop3_code(memblt->bRop),
-		&gdi->palette);
+	return TRUE;
+}
+
+static BOOL bridge_end_paint(rdpContext* context)
+{
+	int i;
+	rdpGdi* gdi;
+	int ninvalid;
+	RECT updateRect;
+	HGDI_RGN cinvalid;
+	REGION16 invalidRegion;
+	RECTANGLE_16 invalidRect;
+	const RECTANGLE_16* extents;
+	gdi = context->gdi;
+	ninvalid = gdi->primary->hdc->hwnd->ninvalid;
+	cinvalid = gdi->primary->hdc->hwnd->cinvalid;
+
+	if (ninvalid < 1)
+		return TRUE;
+
+	region16_init(&invalidRegion);
+
+	for (i = 0; i < ninvalid; i++)
+	{
+		invalidRect.left = cinvalid[i].x;
+		invalidRect.top = cinvalid[i].y;
+		invalidRect.right = cinvalid[i].x + cinvalid[i].w;
+		invalidRect.bottom = cinvalid[i].y + cinvalid[i].h;
+		region16_union_rect(&invalidRegion, &invalidRegion, &invalidRect);
+	}
+
+	if (!region16_is_empty(&invalidRegion))
+	{
+		extents = region16_extents(&invalidRegion);
+		updateRect.left = extents->left;
+		updateRect.top = extents->top;
+		updateRect.right = extents->right;
+		updateRect.bottom = extents->bottom;
+		InvalidateRect(context->gdi->hdc->hwnd, &updateRect, FALSE);
+	}
+
+	region16_uninit(&invalidRegion);
+	return TRUE;
 }
