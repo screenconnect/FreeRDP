@@ -21,6 +21,7 @@
 #include "config.h"
 #endif
 
+#include <freerdp/gdi/video.h>
 #include "xf_channels.h"
 
 #include "xf_client.h"
@@ -30,11 +31,13 @@
 #include "xf_tsmf.h"
 #include "xf_rail.h"
 #include "xf_cliprdr.h"
+#include "xf_disp.h"
+#include "xf_video.h"
 
-void xf_OnChannelConnectedEventHandler(rdpContext* context, ChannelConnectedEventArgs* e)
+void xf_OnChannelConnectedEventHandler(void* context, ChannelConnectedEventArgs* e)
 {
 	xfContext* xfc = (xfContext*) context;
-	rdpSettings* settings = context->settings;
+	rdpSettings* settings = xfc->context.settings;
 
 	if (strcmp(e->name, RDPEI_DVC_CHANNEL_NAME) == 0)
 	{
@@ -46,10 +49,7 @@ void xf_OnChannelConnectedEventHandler(rdpContext* context, ChannelConnectedEven
 	}
 	else if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0)
 	{
-		if (settings->SoftwareGdi)
-			gdi_graphics_pipeline_init(context->gdi, (RdpgfxClientContext*) e->pInterface);
-		else
-			xf_graphics_pipeline_init(xfc, (RdpgfxClientContext*) e->pInterface);
+		xf_graphics_pipeline_init(xfc, (RdpgfxClientContext*) e->pInterface);
 	}
 	else if (strcmp(e->name, RAIL_SVC_CHANNEL_NAME) == 0)
 	{
@@ -63,16 +63,36 @@ void xf_OnChannelConnectedEventHandler(rdpContext* context, ChannelConnectedEven
 	{
 		xf_encomsp_init(xfc, (EncomspClientContext*) e->pInterface);
 	}
+	else if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0)
+	{
+		xf_disp_init(xfc->xfDisp, (DispClientContext*)e->pInterface);
+	}
+	else if (strcmp(e->name, GEOMETRY_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_video_geometry_init(xfc->context.gdi, (GeometryClientContext*)e->pInterface);
+	}
+	else if (strcmp(e->name, VIDEO_CONTROL_DVC_CHANNEL_NAME) == 0)
+	{
+		xf_video_control_init(xfc, (VideoClientContext*)e->pInterface);
+	}
+	else if (strcmp(e->name, VIDEO_DATA_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_video_data_init(xfc->context.gdi, (VideoClientContext*)e->pInterface);
+	}
 }
 
-void xf_OnChannelDisconnectedEventHandler(rdpContext* context, ChannelDisconnectedEventArgs* e)
+void xf_OnChannelDisconnectedEventHandler(void* context, ChannelDisconnectedEventArgs* e)
 {
 	xfContext* xfc = (xfContext*) context;
-	rdpSettings* settings = context->settings;
+	rdpSettings* settings = xfc->context.settings;
 
 	if (strcmp(e->name, RDPEI_DVC_CHANNEL_NAME) == 0)
 	{
 		xfc->rdpei = NULL;
+	}
+	else if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0)
+	{
+		xf_disp_uninit(xfc->xfDisp, (DispClientContext*)e->pInterface);
 	}
 	else if (strcmp(e->name, TSMF_DVC_CHANNEL_NAME) == 0)
 	{
@@ -80,10 +100,7 @@ void xf_OnChannelDisconnectedEventHandler(rdpContext* context, ChannelDisconnect
 	}
 	else if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0)
 	{
-		if (settings->SoftwareGdi)
-			gdi_graphics_pipeline_uninit(context->gdi, (RdpgfxClientContext*) e->pInterface);
-		else
-			xf_graphics_pipeline_uninit(xfc, (RdpgfxClientContext*) e->pInterface);
+		xf_graphics_pipeline_uninit(xfc, (RdpgfxClientContext*) e->pInterface);
 	}
 	else if (strcmp(e->name, RAIL_SVC_CHANNEL_NAME) == 0)
 	{
@@ -96,5 +113,20 @@ void xf_OnChannelDisconnectedEventHandler(rdpContext* context, ChannelDisconnect
 	else if (strcmp(e->name, ENCOMSP_SVC_CHANNEL_NAME) == 0)
 	{
 		xf_encomsp_uninit(xfc, (EncomspClientContext*) e->pInterface);
+	}
+	else if (strcmp(e->name, GEOMETRY_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_video_geometry_uninit(xfc->context.gdi, (GeometryClientContext*)e->pInterface);
+	}
+	else if (strcmp(e->name, VIDEO_CONTROL_DVC_CHANNEL_NAME) == 0)
+	{
+		if (settings->SoftwareGdi)
+			gdi_video_control_uninit(xfc->context.gdi, (VideoClientContext*)e->pInterface);
+		else
+			xf_video_control_uninit(xfc, (VideoClientContext*)e->pInterface);
+	}
+	else if (strcmp(e->name, VIDEO_DATA_DVC_CHANNEL_NAME) == 0)
+	{
+		gdi_video_data_uninit(xfc->context.gdi, (VideoClientContext*)e->pInterface);
 	}
 }

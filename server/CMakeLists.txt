@@ -19,6 +19,7 @@
 
 add_subdirectory(common)
 add_subdirectory(shadow)
+add_subdirectory(proxy)
 
 if(FREERDP_VENDOR)
 	if(WITH_SAMPLE)
@@ -27,10 +28,10 @@ if(FREERDP_VENDOR)
 
 	if(NOT WIN32)
 		if(APPLE AND (NOT IOS))
-			#add_subdirectory(Mac)
+			add_subdirectory(Mac)
 		endif()
 	else()
-		#add_subdirectory(Windows)
+                add_subdirectory(Windows)
 	endif()
 
 	if(NOT DEFINED WITH_FREERDS)
@@ -71,7 +72,7 @@ if(${CMAKE_VERSION} VERSION_GREATER "2.8.10")
 
 	export(PACKAGE freerdp-server)
 
-	set(FREERDP_SERVER_CMAKE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/FreeRDP-Server${FREERDP_VERSION_MAJOR}")
+	SetFreeRDPCMakeInstallDir(FREERDP_SERVER_CMAKE_INSTALL_DIR "FreeRDP-Server${FREERDP_VERSION_MAJOR}")
 
 	configure_package_config_file(FreeRDP-ServerConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/FreeRDP-ServerConfig.cmake
 		INSTALL_DESTINATION ${FREERDP_SERVER_CMAKE_INSTALL_DIR}

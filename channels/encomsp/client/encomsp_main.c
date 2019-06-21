@@ -998,7 +998,6 @@ static VOID VCAPITYPE encomsp_virtual_channel_open_event_ex(LPVOID lpUserParam, 
 			break;
 
 		case CHANNEL_EVENT_WRITE_COMPLETE:
-			Stream_Free((wStream*) pData, TRUE);
 			break;
 
 		case CHANNEL_EVENT_USER:
@@ -1011,7 +1010,7 @@ static VOID VCAPITYPE encomsp_virtual_channel_open_event_ex(LPVOID lpUserParam, 
 	return;
 }
 
-static void* encomsp_virtual_channel_client_thread(void* arg)
+static DWORD WINAPI encomsp_virtual_channel_client_thread(LPVOID arg)
 {
 	wStream* data;
 	wMessage message;
@@ -1054,8 +1053,8 @@ static void* encomsp_virtual_channel_client_thread(void* arg)
 		setChannelError(encomsp->rdpcontext, error,
 		                "encomsp_virtual_channel_client_thread reported an error");
 
-	ExitThread((DWORD)error);
-	return NULL;
+	ExitThread(error);
+	return error;
 }
 
 /**
@@ -1087,7 +1086,7 @@ static UINT encomsp_virtual_channel_event_connected(encomspPlugin* encomsp,
 	}
 
 	if (!(encomsp->thread = CreateThread(NULL, 0,
-	                                     (LPTHREAD_START_ROUTINE) encomsp_virtual_channel_client_thread, (void*) encomsp,
+	                                     encomsp_virtual_channel_client_thread, (void*) encomsp,
 	                                     0, NULL)))
 	{
 		WLog_ERR(TAG, "CreateThread failed!");
@@ -1106,6 +1105,9 @@ static UINT encomsp_virtual_channel_event_connected(encomspPlugin* encomsp,
 static UINT encomsp_virtual_channel_event_disconnected(encomspPlugin* encomsp)
 {
 	UINT rc;
+
+	if (encomsp->OpenHandle == 0)
+		return CHANNEL_RC_OK;
 
 	if (MessageQueue_PostQuit(encomsp->queue, 0)
 	    && (WaitForSingleObject(encomsp->thread, INFINITE) == WAIT_FAILED))
@@ -1148,6 +1150,7 @@ static UINT encomsp_virtual_channel_event_disconnected(encomspPlugin* encomsp)
 static UINT encomsp_virtual_channel_event_terminated(encomspPlugin* encomsp)
 {
 	encomsp->InitHandle = 0;
+	free(encomsp->context);
 	free(encomsp);
 	return CHANNEL_RC_OK;
 }
@@ -1216,7 +1219,7 @@ BOOL VCAPITYPE VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS_EX pEntryPoints, PVOI
 	    CHANNEL_OPTION_ENCRYPT_RDP |
 	    CHANNEL_OPTION_COMPRESS_RDP |
 	    CHANNEL_OPTION_SHOW_PROTOCOL;
-	strcpy(encomsp->channelDef.name, "encomsp");
+	sprintf_s(encomsp->channelDef.name, ARRAYSIZE(encomsp->channelDef.name), "encomsp");
 	pEntryPointsEx = (CHANNEL_ENTRY_POINTS_FREERDP_EX*) pEntryPoints;
 
 	if ((pEntryPointsEx->cbSize >= sizeof(CHANNEL_ENTRY_POINTS_FREERDP_EX)) &&

@@ -34,7 +34,6 @@
 int shadow_capture_align_clip_rect(RECTANGLE_16* rect, RECTANGLE_16* clip)
 {
 	int dx, dy;
-
 	dx = (rect->left % 16);
 
 	if (dx != 0)
@@ -80,35 +79,32 @@ int shadow_capture_align_clip_rect(RECTANGLE_16* rect, RECTANGLE_16* clip)
 	return 1;
 }
 
-int shadow_capture_compare(BYTE* pData1, int nStep1, int nWidth, int nHeight, BYTE* pData2, int nStep2, RECTANGLE_16* rect)
+int shadow_capture_compare(BYTE* pData1, UINT32 nStep1, UINT32 nWidth, UINT32 nHeight,
+                           BYTE* pData2, UINT32 nStep2, RECTANGLE_16* rect)
 {
 	BOOL equal;
 	BOOL allEqual;
-	int tw, th;
-	int tx, ty, k;
-	int nrow, ncol;
-	int l, t, r, b;
-	BYTE *p1, *p2;
+	UINT32 tw, th;
+	UINT32 tx, ty, k;
+	UINT32 nrow, ncol;
+	UINT32 l, t, r, b;
+	BYTE* p1, *p2;
 	BOOL rows[1024];
 #ifdef WITH_DEBUG_SHADOW_CAPTURE
 	BOOL cols[1024];
 #endif
-
 	allEqual = TRUE;
 	ZeroMemory(rect, sizeof(RECTANGLE_16));
 	FillMemory(rows, sizeof(rows), 0xFF);
 #ifdef WITH_DEBUG_SHADOW_CAPTURE
 	FillMemory(cols, sizeof(cols), 0xFF);
 #endif
-
 	nrow = (nHeight + 15) / 16;
 	ncol = (nWidth + 15) / 16;
-
 	l = ncol + 1;
-	r = -1;
-
+	r = 0;
 	t = nrow + 1;
-	b = -1;
+	b = 0;
 
 	for (ty = 0; ty < nrow; ty++)
 	{
@@ -120,7 +116,6 @@ int shadow_capture_compare(BYTE* pData1, int nStep1, int nWidth, int nHeight, BY
 		for (tx = 0; tx < ncol; tx++)
 		{
 			equal = TRUE;
-
 			tw = ((tx + 1) == ncol) ? (nWidth % 16) : 16;
 
 			if (!tw)
@@ -183,7 +178,9 @@ int shadow_capture_compare(BYTE* pData1, int nStep1, int nWidth, int nHeight, BY
 		rect->bottom = nHeight;
 
 #ifdef WITH_DEBUG_SHADOW_CAPTURE
-	char *col_str = calloc(ncol + 1, sizeof(char));
+	size_t size = ncol + 1;
+	char* col_str = calloc(size, sizeof(char));
+
 	if (!col_str)
 	{
 		WLog_ERR(TAG, "calloc failed!");
@@ -191,37 +188,39 @@ int shadow_capture_compare(BYTE* pData1, int nStep1, int nWidth, int nHeight, BY
 	}
 
 	for (tx = 0; tx < ncol; tx++)
-		sprintf(&col_str[tx], "-");
+		sprintf_s(&col_str[tx], size - tx, "-");
+
 	WLog_INFO(TAG, "%s", col_str);
 
 	for (tx = 0; tx < ncol; tx++)
-		sprintf(&col_str[tx], "%c", cols[tx] ? 'O' : 'X');
+		sprintf_s(&col_str[tx], size - tx, "%c", cols[tx] ? 'O' : 'X');
+
 	WLog_INFO(TAG, "%s", col_str);
 
 	for (tx = 0; tx < ncol; tx++)
-		sprintf(&col_str[tx], "-");
+		sprintf_s(&col_str[tx], size - tx, "-");
+
 	WLog_INFO(TAG, "%s", col_str);
 
 	for (ty = 0; ty < nrow; ty++)
 	{
 		for (tx = 0; tx < ncol; tx++)
-			sprintf(&col_str[tx], "%c", cols[tx] ? 'O' : 'X');
+			sprintf_s(&col_str[tx], size - tx, "%c", cols[tx] ? 'O' : 'X');
+
 		WLog_INFO(TAG, "%s", col_str);
 		WLog_INFO(TAG, "|%s|", rows[ty] ? "O" : "X");
 	}
 
 	WLog_INFO(TAG, "left: %d top: %d right: %d bottom: %d ncol: %d nrow: %d",
-			l, t, r, b, ncol, nrow);
+	          l, t, r, b, ncol, nrow);
 	free(col_str);
 #endif
-
 	return 1;
 }
 
 rdpShadowCapture* shadow_capture_new(rdpShadowServer* server)
 {
 	rdpShadowCapture* capture;
-
 	capture = (rdpShadowCapture*) calloc(1, sizeof(rdpShadowCapture));
 
 	if (!capture)
@@ -244,7 +243,6 @@ void shadow_capture_free(rdpShadowCapture* capture)
 		return;
 
 	DeleteCriticalSection(&(capture->lock));
-
 	free(capture);
 }
 

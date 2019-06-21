@@ -69,6 +69,7 @@ struct winpr_comm
 	ULONG WaitEventMask;
 	ULONG PendingEvents;
 
+	char eventChar;
 	/* NB: CloseHandle() has to free resources */
 };
 
@@ -94,7 +95,7 @@ typedef struct winpr_comm WINPR_COMM;
 #define FREERDP_PURGE_RXABORT		0x00000002 /* abort pending reception */
 
 
-void CommLog_Print(int wlog_level, ...);
+void CommLog_Print(DWORD wlog_level, ...);
 
 BOOL CommIsHandled(HANDLE handle);
 BOOL CommCloseHandle(HANDLE handle);

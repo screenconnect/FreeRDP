@@ -20,8 +20,8 @@
  * limitations under the License.
  */
 
-#ifndef __PRINTER_MAIN_H
-#define __PRINTER_MAIN_H
+#ifndef FREERDP_CHANNEL_PRINTER_CLIENT_MAIN_H
+#define FREERDP_CHANNEL_PRINTER_CLIENT_MAIN_H
 
 #include <freerdp/channels/rdpdr.h>
 
@@ -54,7 +54,7 @@ struct rdp_printer
 	pcFreePrinter Free;
 };
 
-typedef UINT (*pcWritePrintJob) (rdpPrintJob* printjob, BYTE* data, int size);
+typedef UINT (*pcWritePrintJob) (rdpPrintJob* printjob, const BYTE* data, size_t size);
 typedef void (*pcClosePrintJob) (rdpPrintJob* printjob);
 
 struct rdp_print_job
@@ -66,4 +66,4 @@ struct rdp_print_job
 	pcClosePrintJob Close;
 };
 
-#endif
+#endif /* FREERDP_CHANNEL_PRINTER_CLIENT_MAIN_H */

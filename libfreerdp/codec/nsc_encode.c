@@ -50,11 +50,12 @@ static BOOL nsc_context_initialize_encode(NSC_CONTEXT* context)
 	{
 		for (i = 0; i < 5; i++)
 		{
-			context->priv->PlaneBuffers[i] = (BYTE*) realloc(context->priv->PlaneBuffers[i],
-			                                 length);
+			BYTE* tmp = (BYTE*) realloc(context->priv->PlaneBuffers[i], length);
 
-			if (!context->priv->PlaneBuffers[i])
+			if (!tmp)
 				goto fail;
+
+			context->priv->PlaneBuffers[i] = tmp;
 		}
 
 		context->priv->PlaneBuffersLength = length;
@@ -87,7 +88,7 @@ fail:
 	return FALSE;
 }
 
-static void nsc_encode_argb_to_aycocg(NSC_CONTEXT* context, const BYTE* data,
+static BOOL nsc_encode_argb_to_aycocg(NSC_CONTEXT* context, const BYTE* data,
                                       UINT32 scanline)
 {
 	UINT16 x;
@@ -104,11 +105,16 @@ static void nsc_encode_argb_to_aycocg(NSC_CONTEXT* context, const BYTE* data,
 	INT16 b_val;
 	BYTE a_val;
 	UINT32 tempWidth;
-	UINT32 tempHeight;
+
 	tempWidth = ROUND_UP_TO(context->width, 8);
-	tempHeight = ROUND_UP_TO(context->height, 2);
 	rw = (context->ChromaSubsamplingLevel ? tempWidth : context->width);
 	ccl = context->ColorLossLevel;
+
+	if (context->priv->PlaneBuffersLength < rw * scanline)
+		return FALSE;
+
+	if (rw < scanline * 2)
+		return FALSE;
 
 	for (y = 0; y < context->height; y++)
 	{
@@ -237,35 +243,44 @@ static void nsc_encode_argb_to_aycocg(NSC_CONTEXT* context, const BYTE* data,
 
 	if (context->ChromaSubsamplingLevel && (y % 2) == 1)
 	{
-		CopyMemory(yplane + rw, yplane, rw);
-		CopyMemory(coplane + rw, coplane, rw);
-		CopyMemory(cgplane + rw, cgplane, rw);
+		yplane = context->priv->PlaneBuffers[0] + y * rw;
+		coplane = context->priv->PlaneBuffers[1] + y * rw;
+		cgplane = context->priv->PlaneBuffers[2] + y * rw;
+		CopyMemory(yplane, yplane - rw, rw);
+		CopyMemory(coplane, coplane - rw, rw);
+		CopyMemory(cgplane, cgplane - rw, rw);
 	}
+
+	return TRUE;
 }
 
-static void nsc_encode_subsampling(NSC_CONTEXT* context)
+static BOOL nsc_encode_subsampling(NSC_CONTEXT* context)
 {
 	UINT16 x;
 	UINT16 y;
-	BYTE* co_dst;
-	BYTE* cg_dst;
-	INT8* co_src0;
-	INT8* co_src1;
-	INT8* cg_src0;
-	INT8* cg_src1;
 	UINT32 tempWidth;
 	UINT32 tempHeight;
+
+	if (!context)
+		return FALSE;
+
 	tempWidth = ROUND_UP_TO(context->width, 8);
 	tempHeight = ROUND_UP_TO(context->height, 2);
 
+	if (tempHeight == 0)
+		return FALSE;
+
+	if (tempWidth > context->priv->PlaneBuffersLength / tempHeight)
+		return FALSE;
+
 	for (y = 0; y < tempHeight >> 1; y++)
 	{
-		co_dst = context->priv->PlaneBuffers[1] + y * (tempWidth >> 1);
-		cg_dst = context->priv->PlaneBuffers[2] + y * (tempWidth >> 1);
-		co_src0 = (INT8*) context->priv->PlaneBuffers[1] + (y << 1) * tempWidth;
-		co_src1 = co_src0 + tempWidth;
-		cg_src0 = (INT8*) context->priv->PlaneBuffers[2] + (y << 1) * tempWidth;
-		cg_src1 = cg_src0 + tempWidth;
+		BYTE* co_dst = context->priv->PlaneBuffers[1] + y * (tempWidth >> 1);
+		BYTE* cg_dst = context->priv->PlaneBuffers[2] + y * (tempWidth >> 1);
+		const INT8* co_src0 = (INT8*) context->priv->PlaneBuffers[1] + (y << 1) * tempWidth;
+		const INT8* co_src1 = co_src0 + tempWidth;
+		const INT8* cg_src0 = (INT8*) context->priv->PlaneBuffers[2] + (y << 1) * tempWidth;
+		const INT8* cg_src1 = cg_src0 + tempWidth;
 
 		for (x = 0; x < tempWidth >> 1; x++)
 		{
@@ -279,19 +294,28 @@ static void nsc_encode_subsampling(NSC_CONTEXT* context)
 			cg_src1 += 2;
 		}
 	}
+
+	return TRUE;
 }
 
-void nsc_encode(NSC_CONTEXT* context, const BYTE* bmpdata, UINT32 rowstride)
+BOOL nsc_encode(NSC_CONTEXT* context, const BYTE* bmpdata, UINT32 rowstride)
 {
-	nsc_encode_argb_to_aycocg(context, bmpdata, rowstride);
+	if (!context || !bmpdata || (rowstride == 0))
+		return FALSE;
+
+	if (!nsc_encode_argb_to_aycocg(context, bmpdata, rowstride))
+		return FALSE;
 
 	if (context->ChromaSubsamplingLevel)
 	{
-		nsc_encode_subsampling(context);
+		if (!nsc_encode_subsampling(context))
+			return FALSE;
 	}
+
+	return TRUE;
 }
 
-static UINT32 nsc_rle_encode(BYTE* in, BYTE* out, UINT32 originalSize)
+static UINT32 nsc_rle_encode(const BYTE* in, BYTE* out, UINT32 originalSize)
 {
 	UINT32 left;
 	UINT32 runlength = 1;
@@ -419,6 +443,13 @@ NSC_MESSAGE* nsc_encode_messages(NSC_CONTEXT* context, const BYTE* data,
 	UINT32 MaxMessageSize;
 	NSC_MESSAGE* messages;
 	UINT32 PaddedMaxPlaneSize;
+
+	if (!context || !data || !numMessages)
+		return NULL;
+
+	if (maxDataSize < 1024)
+		return NULL;
+
 	k = 0;
 	MaxRegionWidth = 64 * 4;
 	MaxRegionHeight = 64 * 2;
@@ -431,6 +462,9 @@ NSC_MESSAGE* nsc_encode_messages(NSC_CONTEXT* context, const BYTE* data,
 	                                      height);
 	MaxMessageSize = ByteCount[0] + ByteCount[1] + ByteCount[2] + ByteCount[3] + 20;
 	maxDataSize -= 1024; /* reserve enough space for headers */
+	if (maxDataSize < (*numMessages) * sizeof(NSC_MESSAGE))
+		return NULL;
+
 	messages = (NSC_MESSAGE*) calloc(*numMessages, sizeof(NSC_MESSAGE));
 
 	if (!messages)
@@ -493,12 +527,12 @@ NSC_MESSAGE* nsc_encode_messages(NSC_CONTEXT* context, const BYTE* data,
 		context->priv->PlaneBuffers[4] = messages[i].PlaneBuffers[4];
 		dataOffset = (messages[i].y * messages[i].scanline) + (messages[i].x *
 		             BytesPerPixel);
-		PROFILER_ENTER(context->priv->prof_nsc_encode);
+		PROFILER_ENTER(context->priv->prof_nsc_encode)
 		context->encode(context, &data[dataOffset], scanline);
-		PROFILER_EXIT(context->priv->prof_nsc_encode);
-		PROFILER_ENTER(context->priv->prof_nsc_rle_compress_data);
+		PROFILER_EXIT(context->priv->prof_nsc_encode)
+		PROFILER_ENTER(context->priv->prof_nsc_rle_compress_data)
 		nsc_rle_compress_data(context);
-		PROFILER_EXIT(context->priv->prof_nsc_rle_compress_data);
+		PROFILER_EXIT(context->priv->prof_nsc_rle_compress_data)
 		messages[i].LumaPlaneByteCount = context->PlaneByteCount[0];
 		messages[i].OrangeChromaPlaneByteCount = context->PlaneByteCount[1];
 		messages[i].GreenChromaPlaneByteCount = context->PlaneByteCount[2];
@@ -581,13 +615,13 @@ BOOL nsc_compose_message(NSC_CONTEXT* context, wStream* s, const BYTE* data,
 		return FALSE;
 
 	/* ARGB to AYCoCg conversion, chroma subsampling and colorloss reduction */
-	PROFILER_ENTER(context->priv->prof_nsc_encode);
+	PROFILER_ENTER(context->priv->prof_nsc_encode)
 	context->encode(context, data, scanline);
-	PROFILER_EXIT(context->priv->prof_nsc_encode);
+	PROFILER_EXIT(context->priv->prof_nsc_encode)
 	/* RLE encode */
-	PROFILER_ENTER(context->priv->prof_nsc_rle_compress_data);
+	PROFILER_ENTER(context->priv->prof_nsc_rle_compress_data)
 	nsc_rle_compress_data(context);
-	PROFILER_EXIT(context->priv->prof_nsc_rle_compress_data);
+	PROFILER_EXIT(context->priv->prof_nsc_rle_compress_data)
 	message->PlaneBuffers[0] = context->priv->PlaneBuffers[0];
 	message->PlaneBuffers[1] = context->priv->PlaneBuffers[1];
 	message->PlaneBuffers[2] = context->priv->PlaneBuffers[2];

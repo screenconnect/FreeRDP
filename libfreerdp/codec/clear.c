@@ -164,7 +164,7 @@ static BOOL clear_decompress_subcode_rlex(wStream* s,
 	Stream_Read_UINT8(s, paletteCount);
 	bitmapDataOffset = 1 + (paletteCount * 3);
 
-	if (paletteCount > 127)
+	if ((paletteCount > 127) || (paletteCount < 1))
 	{
 		WLog_ERR(TAG, "paletteCount %"PRIu8"", paletteCount);
 		return FALSE;
@@ -176,7 +176,7 @@ static BOOL clear_decompress_subcode_rlex(wStream* s,
 		Stream_Read_UINT8(s, b);
 		Stream_Read_UINT8(s, g);
 		Stream_Read_UINT8(s, r);
-		palette[i] = GetColor(DstFormat, r, g, b, 0xFF);
+		palette[i] = FreeRDPGetColor(DstFormat, r, g, b, 0xFF);
 	}
 
 	pixelIndex = 0;
@@ -259,7 +259,7 @@ static BOOL clear_decompress_subcode_rlex(wStream* s,
 		for (i = 0; i < runLengthFactor; i++)
 		{
 			BYTE* pTmpData = &pDstData[(nXDstRel + x) * GetBytesPerPixel(DstFormat) +
-			                           (nYDstRel + y) * nDstStep];
+			                                          (nYDstRel + y) * nDstStep];
 
 			if ((nXDstRel + x < nDstWidth) && (nYDstRel + y < nDstHeight))
 				WriteColor(pTmpData, DstFormat, color);
@@ -284,7 +284,7 @@ static BOOL clear_decompress_subcode_rlex(wStream* s,
 		for (i = 0; i <= suiteDepth; i++)
 		{
 			BYTE* pTmpData = &pDstData[(nXDstRel + x) * GetBytesPerPixel(DstFormat) +
-			                           (nYDstRel + y) * nDstStep];
+			                                          (nYDstRel + y) * nDstStep];
 			UINT32 color = palette[suiteIndex];
 
 			if (suiteIndex > 127)
@@ -393,7 +393,7 @@ static BOOL clear_decompress_residual_data(CLEAR_CONTEXT* clear,
 		Stream_Read_UINT8(s, r);
 		Stream_Read_UINT8(s, runLengthFactor);
 		suboffset += 4;
-		color = GetColor(clear->format, r, g, b, 0xFF);
+		color = FreeRDPGetColor(clear->format, r, g, b, 0xFF);
 
 		if (runLengthFactor >= 0xFF)
 		{
@@ -634,7 +634,6 @@ static BOOL clear_decompress_bands_data(CLEAR_CONTEXT* clear,
 		UINT16 yEnd;
 		UINT32 colorBkg;
 		UINT16 vBarHeader;
-		UINT16 vBarIndex;
 		UINT16 vBarYOn;
 		UINT16 vBarYOff;
 		UINT32 vBarCount;
@@ -655,7 +654,7 @@ static BOOL clear_decompress_bands_data(CLEAR_CONTEXT* clear,
 		Stream_Read_UINT8(s, g);
 		Stream_Read_UINT8(s, r);
 		suboffset += 11;
-		colorBkg = GetColor(clear->format, r, g, b, 0xFF);
+		colorBkg = FreeRDPGetColor(clear->format, r, g, b, 0xFF);
 
 		if (xEnd < xStart)
 		{
@@ -697,7 +696,7 @@ static BOOL clear_decompress_bands_data(CLEAR_CONTEXT* clear,
 
 			if ((vBarHeader & 0xC000) == 0x4000) /* SHORT_VBAR_CACHE_HIT */
 			{
-				vBarIndex = (vBarHeader & 0x3FFF);
+				const UINT16 vBarIndex = (vBarHeader & 0x3FFF);
 				vBarShortEntry = &(clear->ShortVBarStorage[vBarIndex]);
 
 				if (!vBarShortEntry)
@@ -766,7 +765,7 @@ static BOOL clear_decompress_bands_data(CLEAR_CONTEXT* clear,
 					Stream_Read_UINT8(s, b);
 					Stream_Read_UINT8(s, g);
 					Stream_Read_UINT8(s, r);
-					color = GetColor(clear->format, r, g, b, 0xFF);
+					color = FreeRDPGetColor(clear->format, r, g, b, 0xFF);
 
 					if (!WriteColor(dstBuffer, clear->format, color))
 						return FALSE;
@@ -779,8 +778,18 @@ static BOOL clear_decompress_bands_data(CLEAR_CONTEXT* clear,
 			}
 			else if ((vBarHeader & 0x8000) == 0x8000) /* VBAR_CACHE_HIT */
 			{
-				vBarIndex = (vBarHeader & 0x7FFF);
+				const UINT16 vBarIndex = (vBarHeader & 0x7FFF);
 				vBarEntry = &(clear->VBarStorage[vBarIndex]);
+
+				/* If the cache was reset we need to fill in some dummy data. */
+				if (vBarEntry->size == 0)
+				{
+					WLog_WARN(TAG, "Empty cache index %"PRIu16", filling dummy data", vBarIndex);
+					vBarEntry->count = vBarHeight;
+
+					if (!resize_vbar_entry(clear, vBarEntry))
+						return FALSE;
+				}
 			}
 			else
 			{
@@ -834,7 +843,7 @@ static BOOL clear_decompress_bands_data(CLEAR_CONTEXT* clear,
 					count = (vBarPixelCount > y) ? (vBarPixelCount - y) : 0;
 
 				pSrcPixel = &vBarShortEntry->pixels[(y - vBarYOn) * GetBytesPerPixel(
-				                                        clear->format)];
+				                                                      clear->format)];
 
 				for (x = 0; x < count; x++)
 				{
@@ -869,7 +878,10 @@ static BOOL clear_decompress_bands_data(CLEAR_CONTEXT* clear,
 			{
 				WLog_ERR(TAG, "vBarEntry->count %"PRIu32" != vBarHeight %"PRIu32"", vBarEntry->count,
 				         vBarHeight);
-				return FALSE;
+				vBarEntry->count = vBarHeight;
+
+				if (!resize_vbar_entry(clear, vBarEntry))
+					return FALSE;
 			}
 
 			nXDstRel = nXDst + xStart;
@@ -886,10 +898,10 @@ static BOOL clear_decompress_bands_data(CLEAR_CONTEXT* clear,
 				for (y = 0; y < count; y++)
 				{
 					BYTE* pDstPixel8 = &pDstData[((nYDstRel + y) * nDstStep) +
-					                             ((nXDstRel + i) * GetBytesPerPixel(DstFormat))];
+					                                             ((nXDstRel + i) * GetBytesPerPixel(DstFormat))];
 					UINT32 color = ReadColor(pSrcPixel, clear->format);
-					color = ConvertColor(color, clear->format,
-					                     DstFormat, NULL);
+					color = FreeRDPConvertColor(color, clear->format,
+					                            DstFormat, NULL);
 
 					if (!WriteColor(pDstPixel8, DstFormat, color))
 						return FALSE;

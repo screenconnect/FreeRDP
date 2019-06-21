@@ -19,8 +19,8 @@
  * limitations under the License.
  */
 
-#ifndef __XF_GRAPHICS_PIPELINE_H
-#define __XF_GRAPHICS_PIPELINE_H
+#ifndef FREERDP_CLIENT_X11_GFX_H
+#define FREERDP_CLIENT_X11_GFX_H
 
 #include "xf_client.h"
 #include "xfreerdp.h"
@@ -36,21 +36,11 @@ struct xf_gfx_surface
 };
 typedef struct xf_gfx_surface xfGfxSurface;
 
-struct xf_gfx_cache_entry
-{
-	UINT64 cacheKey;
-	UINT32 width;
-	UINT32 height;
-	BYTE* data;
-	UINT32 scanline;
-	UINT32 format;
-};
-typedef struct xf_gfx_cache_entry xfGfxCacheEntry;
-
 UINT xf_OutputExpose(xfContext* xfc, UINT32 x, UINT32 y,
                      UINT32 width, UINT32 height);
 
 void xf_graphics_pipeline_init(xfContext* xfc, RdpgfxClientContext* gfx);
+
 void xf_graphics_pipeline_uninit(xfContext* xfc, RdpgfxClientContext* gfx);
 
-#endif /* __XF_GRAPHICS_PIPELINE_H */
+#endif /* FREERDP_CLIENT_X11_GFX_H */

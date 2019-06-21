@@ -45,11 +45,11 @@
 #include <assert.h>
 #include <unistd.h>
 
-#ifdef HAVE_AIO_H
-#undef HAVE_AIO_H /* disable for now, incomplete */
+#ifdef HAVE_SYS_AIO_H
+#undef HAVE_SYS_AIO_H /* disable for now, incomplete */
 #endif
 
-#ifdef HAVE_AIO_H
+#ifdef HAVE_SYS_AIO_H
 #include <aio.h>
 #endif
 
@@ -246,8 +246,13 @@ static BOOL NamedPipeCloseHandle(HANDLE handle)
 {
 	WINPR_NAMED_PIPE* pNamedPipe = (WINPR_NAMED_PIPE*)handle;
 
+	/* This check confuses the analyzer. Since not all handle
+	 * types are handled here, it guesses that the memory of a
+	 * NamedPipeHandle may leak. */
+#ifndef __clang_analyzer__
 	if (!NamedPipeIsHandled(handle))
 		return FALSE;
+#endif
 
 	if (pNamedPipe->pfnUnrefNamedPipe)
 		pNamedPipe->pfnUnrefNamedPipe(pNamedPipe);
@@ -327,7 +332,7 @@ BOOL NamedPipeRead(PVOID Object, LPVOID lpBuffer, DWORD nNumberOfBytesToRead,
 			return FALSE;
 
 		pipe->lpOverlapped = lpOverlapped;
-#ifdef HAVE_AIO_H
+#ifdef HAVE_SYS_AIO_H
 		{
 			int aio_status;
 			struct aiocb cb;
@@ -416,7 +421,7 @@ BOOL NamedPipeWrite(PVOID Object, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite,
 			return FALSE;
 
 		pipe->lpOverlapped = lpOverlapped;
-#ifdef HAVE_AIO_H
+#ifdef HAVE_SYS_AIO_H
 		{
 			struct aiocb cb;
 			ZeroMemory(&cb, sizeof(struct aiocb));
@@ -457,7 +462,19 @@ static HANDLE_OPS namedOps =
 	NamedPipeRead,
 	NULL,
 	NULL,
-	NamedPipeWrite
+	NamedPipeWrite,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL
 };
 
 static BOOL InitWinPRPipeModule()
@@ -653,7 +670,7 @@ HANDLE CreateNamedPipeA(LPCSTR lpName, DWORD dwOpenMode, DWORD dwPipeMode, DWORD
 
 		ZeroMemory(&s, sizeof(struct sockaddr_un));
 		s.sun_family = AF_UNIX;
-		strcpy(s.sun_path, pNamedPipe->lpFilePath);
+		sprintf_s(s.sun_path, ARRAYSIZE(s.sun_path), "%s", pNamedPipe->lpFilePath);
 
 		if (bind(serverfd, (struct sockaddr*) &s, sizeof(struct sockaddr_un)) == -1)
 		{

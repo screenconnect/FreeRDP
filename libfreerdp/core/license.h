@@ -17,8 +17,8 @@
  * limitations under the License.
  */
 
-#ifndef __LICENSE_H
-#define __LICENSE_H
+#ifndef FREERDP_LIB_CORE_LICENSE_H
+#define FREERDP_LIB_CORE_LICENSE_H
 
 typedef struct rdp_license rdpLicense;
 
@@ -30,116 +30,10 @@ typedef struct rdp_license rdpLicense;
 #include <freerdp/freerdp.h>
 #include <freerdp/log.h>
 #include <freerdp/api.h>
+#include <freerdp/license.h>
 
 #include <winpr/stream.h>
 
-/* Licensing Packet Types */
-
-#define LICENSE_REQUEST				0x01
-#define PLATFORM_CHALLENGE			0x02
-#define NEW_LICENSE				0x03
-#define UPGRADE_LICENSE				0x04
-#define LICENSE_INFO				0x12
-#define NEW_LICENSE_REQUEST			0x13
-#define PLATFORM_CHALLENGE_RESPONSE		0x15
-#define ERROR_ALERT				0xFF
-
-#define LICENSE_PKT_CS_MASK			(LICENSE_INFO | NEW_LICENSE_REQUEST | PLATFORM_CHALLENGE_RESPONSE | ERROR_ALERT)
-#define LICENSE_PKT_SC_MASK			(LICENSE_REQUEST | PLATFORM_CHALLENGE | NEW_LICENSE | UPGRADE_LICENSE | ERROR_ALERT)
-#define LICENSE_PKT_MASK			(LICENSE_PKT_CS_MASK | LICENSE_PKT_SC_MASK)
-
-#define LICENSE_PREAMBLE_LENGTH			4
-
-/* Cryptographic Lengths */
-
-#define CLIENT_RANDOM_LENGTH			32
-#define SERVER_RANDOM_LENGTH			32
-#define MASTER_SECRET_LENGTH			48
-#define PREMASTER_SECRET_LENGTH			48
-#define SESSION_KEY_BLOB_LENGTH			48
-#define MAC_SALT_KEY_LENGTH			16
-#define LICENSING_ENCRYPTION_KEY_LENGTH		16
-#define HWID_PLATFORM_ID_LENGTH			4
-#define HWID_UNIQUE_DATA_LENGTH			16
-#define HWID_LENGTH				20
-#define LICENSING_PADDING_SIZE			8
-
-/* Preamble Flags */
-
-#define PREAMBLE_VERSION_2_0			0x02
-#define PREAMBLE_VERSION_3_0			0x03
-#define LicenseProtocolVersionMask		0x0F
-#define EXTENDED_ERROR_MSG_SUPPORTED		0x80
-
-/* Binary Blob Types */
-
-#define BB_ANY_BLOB				0x0000
-#define BB_DATA_BLOB				0x0001
-#define BB_RANDOM_BLOB				0x0002
-#define BB_CERTIFICATE_BLOB			0x0003
-#define BB_ERROR_BLOB				0x0004
-#define BB_ENCRYPTED_DATA_BLOB			0x0009
-#define BB_KEY_EXCHG_ALG_BLOB			0x000D
-#define BB_SCOPE_BLOB				0x000E
-#define BB_CLIENT_USER_NAME_BLOB		0x000F
-#define BB_CLIENT_MACHINE_NAME_BLOB		0x0010
-
-/* License Key Exchange Algorithms */
-
-#define KEY_EXCHANGE_ALG_RSA			0x00000001
-
-/* License Error Codes */
-
-#define ERR_INVALID_SERVER_CERTIFICATE		0x00000001
-#define ERR_NO_LICENSE				0x00000002
-#define ERR_INVALID_MAC				0x00000003
-#define ERR_INVALID_SCOPE			0x00000004
-#define ERR_NO_LICENSE_SERVER			0x00000006
-#define STATUS_VALID_CLIENT			0x00000007
-#define ERR_INVALID_CLIENT			0x00000008
-#define ERR_INVALID_PRODUCT_ID			0x0000000B
-#define ERR_INVALID_MESSAGE_LENGTH		0x0000000C
-
-/* State Transition Codes */
-
-#define ST_TOTAL_ABORT				0x00000001
-#define ST_NO_TRANSITION			0x00000002
-#define ST_RESET_PHASE_TO_START			0x00000003
-#define ST_RESEND_LAST_MESSAGE			0x00000004
-
-/* Platform Challenge Types */
-
-#define WIN32_PLATFORM_CHALLENGE_TYPE		0x0100
-#define WIN16_PLATFORM_CHALLENGE_TYPE		0x0200
-#define WINCE_PLATFORM_CHALLENGE_TYPE		0x0300
-#define OTHER_PLATFORM_CHALLENGE_TYPE		0xFF00
-
-/* License Detail Levels */
-
-#define LICENSE_DETAIL_SIMPLE			0x0001
-#define LICENSE_DETAIL_MODERATE			0x0002
-#define LICENSE_DETAIL_DETAIL			0x0003
-
-/*
- * PlatformId:
- *
- * The most significant byte of the PlatformId field contains the operating system version of the client.
- * The second most significant byte of the PlatformId field identifies the ISV that provided the client image.
- * The remaining two bytes in the PlatformId field are used by the ISV to identify the build number of the operating system.
- *
- * 0x04010000:
- *
- * CLIENT_OS_ID_WINNT_POST_52	(0x04000000)
- * CLIENT_IMAGE_ID_MICROSOFT	(0x00010000)
- */
-
-#define CLIENT_OS_ID_WINNT_351			0x01000000
-#define CLIENT_OS_ID_WINNT_40			0x02000000
-#define CLIENT_OS_ID_WINNT_50			0x03000000
-#define CLIENT_OS_ID_WINNT_POST_52		0x04000000
-
-#define CLIENT_IMAGE_ID_MICROSOFT		0x00010000
-#define CLIENT_IMAGE_ID_CITRIX			0x00020000
 
 typedef struct
 {
@@ -196,56 +90,14 @@ struct rdp_license
 	LICENSE_BLOB* PlatformChallenge;
 	LICENSE_BLOB* EncryptedPremasterSecret;
 	LICENSE_BLOB* EncryptedPlatformChallenge;
+	LICENSE_BLOB *EncryptedPlatformChallengeResponse;
 	LICENSE_BLOB* EncryptedHardwareId;
 	SCOPE_LIST* ScopeList;
 	UINT32 PacketHeaderLength;
 };
 
 FREERDP_LOCAL int license_recv(rdpLicense* license, wStream* s);
-FREERDP_LOCAL BOOL license_send(rdpLicense* license, wStream* s, BYTE type);
-FREERDP_LOCAL wStream* license_send_stream_init(rdpLicense* license);
 
-FREERDP_LOCAL void license_generate_randoms(rdpLicense* license);
-FREERDP_LOCAL BOOL license_generate_keys(rdpLicense* license);
-FREERDP_LOCAL BOOL license_generate_hwid(rdpLicense* license);
-FREERDP_LOCAL BOOL license_encrypt_premaster_secret(rdpLicense* license);
-FREERDP_LOCAL BOOL license_decrypt_platform_challenge(rdpLicense* license);
-
-FREERDP_LOCAL LICENSE_PRODUCT_INFO* license_new_product_info(void);
-FREERDP_LOCAL void license_free_product_info(LICENSE_PRODUCT_INFO* productInfo);
-FREERDP_LOCAL BOOL license_read_product_info(wStream* s,
-        LICENSE_PRODUCT_INFO* productInfo);
-
-FREERDP_LOCAL LICENSE_BLOB* license_new_binary_blob(UINT16 type);
-FREERDP_LOCAL void license_free_binary_blob(LICENSE_BLOB* blob);
-FREERDP_LOCAL BOOL license_read_binary_blob(wStream* s, LICENSE_BLOB* blob);
-FREERDP_LOCAL BOOL license_write_binary_blob(wStream* s, LICENSE_BLOB* blob);
-
-FREERDP_LOCAL SCOPE_LIST* license_new_scope_list(void);
-FREERDP_LOCAL void license_free_scope_list(SCOPE_LIST* scopeList);
-FREERDP_LOCAL BOOL license_read_scope_list(wStream* s, SCOPE_LIST* scopeList);
-
-FREERDP_LOCAL BOOL license_read_license_request_packet(rdpLicense* license,
-        wStream* s);
-FREERDP_LOCAL BOOL license_read_platform_challenge_packet(rdpLicense* license,
-        wStream* s);
-FREERDP_LOCAL void license_read_new_license_packet(rdpLicense* license,
-        wStream* s);
-FREERDP_LOCAL void license_read_upgrade_license_packet(rdpLicense* license,
-        wStream* s);
-FREERDP_LOCAL BOOL license_read_error_alert_packet(rdpLicense* license,
-        wStream* s);
-
-FREERDP_LOCAL BOOL license_write_new_license_request_packet(rdpLicense* license,
-        wStream* s);
-FREERDP_LOCAL BOOL license_send_new_license_request_packet(rdpLicense* license);
-
-FREERDP_LOCAL BOOL license_write_platform_challenge_response_packet(
-    rdpLicense* license, wStream* s, BYTE* mac_data);
-FREERDP_LOCAL BOOL license_send_platform_challenge_response_packet(
-    rdpLicense* license);
-
-FREERDP_LOCAL BOOL license_send_valid_client_error_packet(rdpLicense* license);
 
 FREERDP_LOCAL rdpLicense* license_new(rdpRdp* rdp);
 FREERDP_LOCAL void license_free(rdpLicense* license);
@@ -257,4 +109,4 @@ FREERDP_LOCAL void license_free(rdpLicense* license);
 #define DEBUG_LICENSE(...) do { } while (0)
 #endif
 
-#endif /* __LICENSE_H */
+#endif /* FREERDP_LIB_CORE_LICENSE_H */

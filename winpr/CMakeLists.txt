@@ -39,7 +39,6 @@ set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/)
 # Check for cmake compatibility (enable/disable features)
 include(CheckCmakeCompat)
 include(FindFeature)
-include(AutoVersioning)
 include(ConfigOptions)
 include(ComplexLibrary)
 include(FeatureSummary)
@@ -159,10 +158,14 @@ if(NOT DEFINED BUILD_SHARED_LIBS)
 	set(BUILD_SHARED_LIBS ON)
 endif()
 
+if(BUILD_SHARED_LIBS)
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DWINPR_DLL")
+endif()
+
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DWINPR_EXPORTS")
 
-# Enable 64bit file support on linux.
-if("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
+# Enable 64bit file support on linux and FreeBSD.
+if("${CMAKE_SYSTEM_NAME}" MATCHES "Linux" OR FREEBSD)
 	add_definitions("-D_FILE_OFFSET_BITS=64")
 endif()
 
@@ -188,7 +191,7 @@ if(${CMAKE_VERSION} VERSION_GREATER "2.8.10")
 
 	export(PACKAGE winpr)
 
-	set(WINPR_CMAKE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/WinPR${WINPR_VERSION_MAJOR}")
+	SetFreeRDPCMakeInstallDir(WINPR_CMAKE_INSTALL_DIR "WinPR${WINPR_VERSION_MAJOR}")
 
 	set(WINPR_INCLUDE_DIR "include/winpr${WINPR_VERSION_MAJOR}")
 

@@ -23,6 +23,8 @@
 #include <freerdp/api.h>
 #include <freerdp/types.h>
 
+#include <winpr/shell.h>
+
 #define CLIPRDR_SVC_CHANNEL_NAME	"cliprdr"
 
 /**
@@ -33,6 +35,7 @@
 #define CB_FORMAT_PNG			0xD011
 #define CB_FORMAT_JPEG			0xD012
 #define CB_FORMAT_GIF			0xD013
+#define CB_FORMAT_TEXTURILIST		0xD014
 
 /* CLIPRDR_HEADER.msgType */
 #define CB_MONITOR_READY		0x0001
@@ -84,32 +87,18 @@ struct _CLIPRDR_MFPICT
 };
 typedef struct _CLIPRDR_MFPICT CLIPRDR_MFPICT;
 
-struct _CLIPRDR_FILEDESCRIPTOR
-{
-	DWORD    dwFlags;
-	BYTE     clsid[16];
-	BYTE     sizel[8];
-	BYTE     pointl[8];
-	DWORD    dwFileAttributes;
-	FILETIME ftCreationTime;
-	FILETIME ftLastAccessTime;
-	FILETIME ftLastWriteTime;
-	DWORD    nFileSizeHigh;
-	DWORD    nFileSizeLow;
-	union
-	{
-		WCHAR    w[260];
-		CHAR	 c[520];
-	} cFileName;
-};
-typedef struct _CLIPRDR_FILEDESCRIPTOR CLIPRDR_FILEDESCRIPTOR;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-struct _CLIPRDR_FILELIST
-{
-	UINT32 cItems;
-	CLIPRDR_FILEDESCRIPTOR* fileDescriptorArray;
-};
-typedef struct _CLIPRDR_FILELIST CLIPRDR_FILELIST;
+FREERDP_API UINT cliprdr_parse_file_list(const BYTE* format_data, UINT32 format_data_length,
+		FILEDESCRIPTOR** file_descriptor_array, UINT32* file_descriptor_count);
+FREERDP_API UINT cliprdr_serialize_file_list(const FILEDESCRIPTOR* file_descriptor_array,
+		UINT32 file_descriptor_count, BYTE** format_data, UINT32* format_data_length);
+
+#ifdef __cplusplus
+}
+#endif
 
 /* Clipboard Messages */
 
@@ -214,7 +203,7 @@ struct _CLIPRDR_FORMAT_DATA_RESPONSE
 {
 	DEFINE_CLIPRDR_HEADER_COMMON();
 
-	BYTE* requestedFormatData;
+	const BYTE* requestedFormatData;
 };
 typedef struct _CLIPRDR_FORMAT_DATA_RESPONSE CLIPRDR_FORMAT_DATA_RESPONSE;
 
@@ -228,6 +217,7 @@ struct _CLIPRDR_FILE_CONTENTS_REQUEST
 	UINT32 nPositionLow;
 	UINT32 nPositionHigh;
 	UINT32 cbRequested;
+	BOOL haveClipDataId;
 	UINT32 clipDataId;
 };
 typedef struct _CLIPRDR_FILE_CONTENTS_REQUEST CLIPRDR_FILE_CONTENTS_REQUEST;
@@ -239,7 +229,7 @@ struct _CLIPRDR_FILE_CONTENTS_RESPONSE
 	UINT32 streamId;
 	UINT32 dwFlags;
 	UINT32 cbRequested;
-	BYTE* requestedData;
+	const BYTE* requestedData;
 };
 typedef struct _CLIPRDR_FILE_CONTENTS_RESPONSE CLIPRDR_FILE_CONTENTS_RESPONSE;
 

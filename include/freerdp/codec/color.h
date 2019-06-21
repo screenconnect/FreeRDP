@@ -118,7 +118,7 @@ static INLINE DWORD AreColorFormatsEqualNoAlpha(DWORD first, DWORD second)
  *
  * @return A string representation of format
  */
-static const char* GetColorFormatName(UINT32 format)
+static const char* FreeRDPGetColorFormatName(UINT32 format)
 {
 	switch (format)
 	{
@@ -509,7 +509,7 @@ static INLINE void SplitColor(UINT32 color, UINT32 format, BYTE* _r, BYTE* _g,
 			if (_a)
 				*_a = 0x00;
 
-			WLog_ERR(CTAG, "Unsupported format %s", GetColorFormatName(format));
+			WLog_ERR(CTAG, "Unsupported format %s", FreeRDPGetColorFormatName(format));
 			break;
 	}
 }
@@ -527,7 +527,7 @@ static INLINE void SplitColor(UINT32 color, UINT32 format, BYTE* _r, BYTE* _g,
  * @return       The pixel color in the desired format. Value is in internal
  *               representation.
  */
-static INLINE UINT32 GetColor(UINT32 format, BYTE r, BYTE g, BYTE b, BYTE a)
+static INLINE UINT32 FreeRDPGetColor(UINT32 format, BYTE r, BYTE g, BYTE b, BYTE a)
 {
 	UINT32 _r = r;
 	UINT32 _g = g;
@@ -603,7 +603,7 @@ static INLINE UINT32 GetColor(UINT32 format, BYTE r, BYTE g, BYTE b, BYTE a)
 		/* 1bpp formats */
 		case PIXEL_FORMAT_MONO:
 		default:
-			WLog_ERR(CTAG, "Unsupported format %s", GetColorFormatName(format));
+			WLog_ERR(CTAG, "Unsupported format %s", FreeRDPGetColorFormatName(format));
 			return 0;
 	}
 }
@@ -679,7 +679,7 @@ static INLINE UINT32 ReadColor(const BYTE* src, UINT32 format)
 			break;
 
 		default:
-			WLog_ERR(CTAG, "Unsupported format %s", GetColorFormatName(format));
+			WLog_ERR(CTAG, "Unsupported format %s", FreeRDPGetColorFormatName(format));
 			color = 0;
 			break;
 	}
@@ -732,7 +732,7 @@ static INLINE BOOL WriteColor(BYTE* dst, UINT32 format, UINT32 color)
 			break;
 
 		default:
-			WLog_ERR(CTAG, "Unsupported format %s", GetColorFormatName(format));
+			WLog_ERR(CTAG, "Unsupported format %s", FreeRDPGetColorFormatName(format));
 			return FALSE;
 	}
 
@@ -751,15 +751,15 @@ static INLINE BOOL WriteColor(BYTE* dst, UINT32 format, UINT32 color)
  *
  * @return           The converted pixel color in dstFormat representation
  */
-static INLINE UINT32 ConvertColor(UINT32 color, UINT32 srcFormat,
-                                  UINT32 dstFormat, const gdiPalette* palette)
+static INLINE UINT32 FreeRDPConvertColor(UINT32 color, UINT32 srcFormat,
+        UINT32 dstFormat, const gdiPalette* palette)
 {
 	BYTE r = 0;
 	BYTE g = 0;
 	BYTE b = 0;
 	BYTE a = 0;
 	SplitColor(color, srcFormat, &r, &g, &b, &a, palette);
-	return GetColor(dstFormat, r, g, b, a);
+	return FreeRDPGetColor(dstFormat, r, g, b, a);
 }
 
 /***
@@ -820,6 +820,33 @@ FREERDP_API BOOL freerdp_image_copy_from_monochrome(BYTE* pDstData,
  * @param nYDst         destination buffer offset y
  * @param nWidth        width to copy in pixels
  * @param nHeight       height to copy in pixels
+ * @param bitsColor     icon's image data buffer
+ * @param cbBitsColor   length of the image data buffer in bytes
+ * @param bitsMask      icon's 1bpp image mask buffer
+ * @param cbBitsMask    length of the image mask buffer in bytes
+ * @param colorTable    icon's image color table
+ * @param cbBitsColor   length of the image color table buffer in bytes
+ * @param bpp           color image data bits per pixel
+ *
+ * @return              TRUE if success, FALSE otherwise
+ */
+FREERDP_API BOOL freerdp_image_copy_from_icon_data(
+	BYTE* pDstData, UINT32 DstFormat, UINT32 nDstStep,
+	UINT32 nXDst, UINT32 nYDst, UINT16 nWidth, UINT16 nHeight,
+	const BYTE* bitsColor, UINT16 cbBitsColor,
+	const BYTE* bitsMask, UINT16 cbBitsMask,
+	const BYTE* colorTable, UINT16 cbColorTable,
+	UINT32 bpp);
+
+/***
+ *
+ * @param pDstData      destination buffer
+ * @param DstFormat     destination buffer format
+ * @param nDstStep      destination buffer stride (line in bytes) 0 for default
+ * @param nXDst         destination buffer offset x
+ * @param nYDst         destination buffer offset y
+ * @param nWidth        width to copy in pixels
+ * @param nHeight       height to copy in pixels
  * @param xorMask       XOR mask buffer
  * @param xorMaskLength XOR mask length in bytes
  * @param andMask       AND mask buffer
@@ -864,6 +891,32 @@ FREERDP_API BOOL freerdp_image_copy(BYTE* pDstData, DWORD DstFormat,
 
 /***
  *
+ * @param pDstData   destination buffer
+ * @param DstFormat  destination buffer format
+ * @param nDstStep   destination buffer stride (line in bytes) 0 for default
+ * @param nXDst      destination buffer offset x
+ * @param nYDst      destination buffer offset y
+ * @param nDstWidth  width of destination in pixels
+ * @param nDstHeight height of destination in pixels
+ * @param pSrcData   source buffer
+ * @param SrcFormat  source buffer format
+ * @param nSrcStep   source buffer stride (line in bytes) 0 for default
+ * @param nXSrc      source buffer x offset in pixels
+ * @param nYSrc      source buffer y offset in pixels
+ * @param nSrcWidth  width of source in pixels
+ * @param nSrcHeight height of source in pixels
+ *
+ * @return          TRUE if success, FALSE otherwise
+ */
+FREERDP_API BOOL freerdp_image_scale(BYTE* pDstData, DWORD DstFormat,
+                                     UINT32 nDstStep, UINT32 nXDst, UINT32 nYDst,
+                                     UINT32 nDstWidth, UINT32 nDstHeight,
+                                     const BYTE* pSrcData, DWORD SrcFormat,
+                                     UINT32 nSrcStep, UINT32 nXSrc, UINT32 nYSrc,
+                                     UINT32 nSrcWidth, UINT32 nSrcHeight);
+
+/***
+ *
  * @param pDstData  destionation buffer
  * @param DstFormat destionation buffer format
  * @param nDstStep  destionation buffer stride (line in bytes) 0 for default
@@ -872,13 +925,19 @@ FREERDP_API BOOL freerdp_image_copy(BYTE* pDstData, DWORD DstFormat,
  * @param nWidth    width to copy in pixels
  * @param nHeight   height to copy in pixels
  * @param color     Pixel color in DstFormat (internal representation format,
- *                  use GetColor to create)
+ *                  use FreeRDPGetColor to create)
  *
  * @return          TRUE if success, FALSE otherwise
  */
 FREERDP_API BOOL freerdp_image_fill(BYTE* pDstData, DWORD DstFormat,
                                     UINT32 nDstStep, UINT32 nXDst, UINT32 nYDst,
                                     UINT32 nWidth, UINT32 nHeight, UINT32 color);
+
+#if !defined(__APPLE__)
+#define GetColorFormatName FreeRDPGetColorFormatName
+#define GetColor FreeRDPGetColor
+#define ConvertColor FreeRDPConvertColor
+#endif
 
 #ifdef __cplusplus
 }

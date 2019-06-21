@@ -17,21 +17,21 @@
  * limitations under the License.
  */
 
-#ifndef FREERDP_CORE_RPC_BIND_H
-#define FREERDP_CORE_RPC_BIND_H
+#ifndef FREERDP_LIB_CORE_GATEWAY_RPC_BIND_H
+#define FREERDP_LIB_CORE_GATEWAY_RPC_BIND_H
 
 #include "rpc.h"
 
 #include <winpr/wtypes.h>
 #include <freerdp/api.h>
 
-FREERDP_LOCAL const p_uuid_t TSGU_UUID;
+FREERDP_LOCAL extern const p_uuid_t TSGU_UUID;
 #define TSGU_SYNTAX_IF_VERSION	0x00030001
 
-FREERDP_LOCAL const p_uuid_t NDR_UUID;
+FREERDP_LOCAL extern const p_uuid_t NDR_UUID;
 #define NDR_SYNTAX_IF_VERSION	0x00000002
 
-FREERDP_LOCAL const p_uuid_t BTFN_UUID;
+FREERDP_LOCAL extern const p_uuid_t BTFN_UUID;
 #define BTFN_SYNTAX_IF_VERSION	0x00000001
 
 FREERDP_LOCAL int rpc_send_bind_pdu(rdpRpc* rpc);
@@ -39,4 +39,4 @@ FREERDP_LOCAL int rpc_recv_bind_ack_pdu(rdpRpc* rpc, BYTE* buffer,
                                         UINT32 length);
 FREERDP_LOCAL int rpc_send_rpc_auth_3_pdu(rdpRpc* rpc);
 
-#endif /* FREERDP_CORE_RPC_BIND_H */
+#endif /* FREERDP_LIB_CORE_GATEWAY_RPC_BIND_H */

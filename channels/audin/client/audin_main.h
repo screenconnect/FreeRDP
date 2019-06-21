@@ -17,8 +17,8 @@
  * limitations under the License.
  */
 
-#ifndef FREERDP_AUDIN_CLIENT_MAIN_H
-#define FREERDP_AUDIN_CLIENT_MAIN_H
+#ifndef FREERDP_CHANNEL_AUDIN_CLIENT_MAIN_H
+#define FREERDP_CHANNEL_AUDIN_CLIENT_MAIN_H
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -32,11 +32,5 @@
 
 #define TAG CHANNELS_TAG("audin.client")
 
-#ifdef WITH_DEBUG_DVC
-#define DEBUG_DVC(...) WLog_DBG(TAG, __VA_ARGS__)
-#else
-#define DEBUG_DVC(...) do { } while (0)
-#endif
-
-#endif /* FREERDP_AUDIN_CLIENT_MAIN_H */
+#endif /* FREERDP_CHANNEL_AUDIN_CLIENT_MAIN_H */
 

@@ -36,7 +36,7 @@ set(${MODULE_PREFIX}_COLLECTIONS_SRCS
 	collections/StreamPool.c
 	collections/MessageQueue.c
 	collections/MessagePipe.c)
-	
+
 set(${MODULE_PREFIX}_LODEPNG_SRCS
 	lodepng/lodepng.c
 	lodepng/lodepng.h)
@@ -66,9 +66,9 @@ if (LIBSYSTEMD_FOUND)
 	)
 
 	winpr_include_directory_add(${LIBSYSTEMD_INCLUDE_DIR})
-	winpr_library_add(${LIBSYSTEMD_LIBRARY})
+	winpr_library_add_private(${LIBSYSTEMD_LIBRARY})
 endif()
-	
+
 set(${MODULE_PREFIX}_WLOG_SRCS
 	wlog/wlog.c
 	wlog/wlog.h
@@ -107,6 +107,7 @@ set(${MODULE_PREFIX}_SRCS
 	image.c
 	print.c
 	stream.c
+	strlst.c
 	debug.c
 	winpr.c
 	cmdline.c
@@ -126,30 +127,29 @@ winpr_include_directory_add(
 	"lodepng"
 	"trio"
 	".")
-	
+
 if(OPENSSL_FOUND)
 	winpr_include_directory_add(${OPENSSL_INCLUDE_DIR})
-	winpr_library_add(${OPENSSL_LIBRARIES})
+	winpr_library_add_private(${OPENSSL_LIBRARIES})
 endif()
 
 if(MBEDTLS_FOUND)
 	winpr_include_directory_add(${MBEDTLS_INCLUDE_DIR})
-	winpr_library_add(${MBEDTLS_LIBRARIES})
+	winpr_library_add_private(${MBEDTLS_LIBRARIES})
 endif()
 
 if(UNIX)
-	winpr_library_add(m)
+	winpr_library_add_private(m)
 endif()
 
-if(FREEBSD)
-	winpr_library_add(execinfo)
+if((FREEBSD) AND (NOT KFREEBSD))
+	winpr_library_add_private(execinfo)
 endif()
 
 if(WIN32)
-	winpr_library_add(Dbghelp)
+	winpr_library_add_public(dbghelp)
 endif()
 
 if(BUILD_TESTING)
 	add_subdirectory(test)
 endif()
-

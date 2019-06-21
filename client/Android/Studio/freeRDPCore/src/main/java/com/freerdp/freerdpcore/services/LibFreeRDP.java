@@ -13,6 +13,7 @@ package com.freerdp.freerdpcore.services;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.support.v4.util.LongSparseArray;
 import android.util.Log;
 
 import com.freerdp.freerdpcore.application.GlobalApp;
@@ -27,6 +28,8 @@ public class LibFreeRDP {
     private static final String TAG = "LibFreeRDP";
     private static EventListener listener;
     private static boolean mHasH264 = true;
+
+    private static final LongSparseArray<Boolean> mInstanceState = new LongSparseArray<>();
 
     static {
         final String h264 = "openh264";
@@ -79,9 +82,11 @@ public class LibFreeRDP {
 
     private static native boolean freerdp_send_key_event(long inst, int keycode, boolean down);
 
-    private static native boolean freerdp_send_unicodekey_event(long inst, int keycode);
+    private static native boolean freerdp_send_unicodekey_event(long inst, int keycode, boolean down);
 
     private static native boolean freerdp_send_clipboard_data(long inst, String data);
+
+    private static native String freerdp_get_last_error_string(long inst);
 
     public static void setEventListener(EventListener l) {
         listener = l;
@@ -92,19 +97,46 @@ public class LibFreeRDP {
     }
 
     public static void freeInstance(long inst) {
+        synchronized (mInstanceState) {
+            if (mInstanceState.get(inst, false)) {
+                freerdp_disconnect(inst);
+            }
+            while(mInstanceState.get(inst, false)) {
+                try {
+                    mInstanceState.wait();
+                } catch (InterruptedException e) {
+                    throw new RuntimeException();
+                }
+            }
+        }
         freerdp_free(inst);
     }
 
     public static boolean connect(long inst) {
+        synchronized (mInstanceState) {
+            if (mInstanceState.get(inst, false)) {
+                throw new RuntimeException("instance already connected");
+            }
+        }
         return freerdp_connect(inst);
     }
 
     public static boolean disconnect(long inst) {
-        return freerdp_disconnect(inst);
+        synchronized (mInstanceState) {
+            if (mInstanceState.get(inst, false)) {
+                return freerdp_disconnect(inst);
+            }
+            return true;
+        }
     }
 
     public static boolean cancelConnection(long inst) {
-        return freerdp_disconnect(inst);
+        synchronized (mInstanceState) {
+            if (mInstanceState.get(inst, false)) {
+                return freerdp_disconnect(inst);
+            }
+            return true;
+        }
     }
 
     private static String addFlag(String name, boolean enabled) {
@@ -127,7 +159,7 @@ public class LibFreeRDP {
 
         final String clientName = ApplicationSettingsActivity.getClientName(context);
         if (!clientName.isEmpty()) {
-            args.add("/client-hostname:\"" + clientName + "\"");
+            args.add("/client-hostname:" + clientName);
         }
         String certName = "";
         if (bookmark.getType() != BookmarkBase.TYPE_MANUAL) {
@@ -201,7 +233,7 @@ public class LibFreeRDP {
         args.add(addFlag("glyph-cache", false));
 
         if (!advanced.getRemoteProgram().isEmpty()) {
-            args.add("/app:" + advanced.getRemoteProgram());
+            args.add("/shell:" + advanced.getRemoteProgram());
         }
 
         if (!advanced.getWorkDir().isEmpty()) {
@@ -209,7 +241,6 @@ public class LibFreeRDP {
         }
 
         args.add(addFlag("async-channels", debug.getAsyncChannel()));
-        //args.add(addFlag("async-transport", debug.getAsyncTransport()));
         args.add(addFlag("async-input", debug.getAsyncInput()));
         args.add(addFlag("async-update", debug.getAsyncUpdate()));
 
@@ -252,6 +283,7 @@ public class LibFreeRDP {
             args.add("/microphone");
         }
 
+        args.add("/cert-ignore");
         args.add("/log-level:" + debug.getDebugLevel());
         String[] arrayArgs = args.toArray(new String[args.size()]);
         return freerdp_parse_arguments(inst, arrayArgs);
@@ -269,7 +301,7 @@ public class LibFreeRDP {
 
         final String clientName = ApplicationSettingsActivity.getClientName(context);
         if (!clientName.isEmpty()) {
-            args.add("/client-hostname:\"" + clientName + "\"");
+            args.add("/client-hostname:" + clientName);
         }
 
         // Parse hostname and port. Set to 'v' argument
@@ -325,8 +357,8 @@ public class LibFreeRDP {
         return freerdp_send_key_event(inst, keycode, down);
     }
 
-    public static boolean sendUnicodeKeyEvent(long inst, int keycode) {
-        return freerdp_send_unicodekey_event(inst, keycode);
+    public static boolean sendUnicodeKeyEvent(long inst, int keycode, boolean down) {
+        return freerdp_send_unicodekey_event(inst, keycode, down);
     }
 
     public static boolean sendClipboardData(long inst, String data) {
@@ -336,11 +368,19 @@ public class LibFreeRDP {
     private static void OnConnectionSuccess(long inst) {
         if (listener != null)
             listener.OnConnectionSuccess(inst);
+        synchronized (mInstanceState) {
+            mInstanceState.append(inst, true);
+            mInstanceState.notifyAll();
+        }
     }
 
     private static void OnConnectionFailure(long inst) {
         if (listener != null)
             listener.OnConnectionFailure(inst);
+        synchronized (mInstanceState) {
+            mInstanceState.remove(inst);
+            mInstanceState.notifyAll();
+        }
     }
 
     private static void OnPreConnect(long inst) {
@@ -356,6 +396,10 @@ public class LibFreeRDP {
     private static void OnDisconnected(long inst) {
         if (listener != null)
             listener.OnDisconnected(inst);
+        synchronized (mInstanceState) {
+            mInstanceState.remove(inst);
+            mInstanceState.notifyAll();
+        }
     }
 
     private static void OnSettingsChanged(long inst, int width, int height, int bpp) {

@@ -102,8 +102,8 @@ static BOOL wf_decode_color(wfContext* wfc, const UINT32 srcColor,
 			return FALSE;
 	}
 
-	*color = ConvertColor(srcColor, SrcFormat,
-	                      DstFormat, &gdi->palette);
+	*color = FreeRDPConvertColor(srcColor, SrcFormat,
+	                             DstFormat, &gdi->palette);
 	return TRUE;
 }
 
@@ -351,12 +351,30 @@ void wf_resize_window(wfContext* wfc)
 	else if (!wfc->context.settings->Decorations)
 	{
 		SetWindowLongPtr(wfc->hwnd, GWL_STYLE, WS_CHILD);
-		/* Now resize to get full canvas size and room for caption and borders */
-		SetWindowPos(wfc->hwnd, HWND_TOP, 0, 0, settings->DesktopWidth,
-		             settings->DesktopHeight, SWP_FRAMECHANGED);
-		wf_update_canvas_diff(wfc);
-		SetWindowPos(wfc->hwnd, HWND_TOP, -1, -1, settings->DesktopWidth + wfc->diff.x,
-		             settings->DesktopHeight + wfc->diff.y, SWP_NOMOVE | SWP_FRAMECHANGED);
+
+		if (settings->EmbeddedWindow)
+		{
+			if (!wfc->client_height)
+				wfc->client_height = settings->DesktopHeight;
+
+			if (!wfc->client_width)
+				wfc->client_width = settings->DesktopWidth;
+
+			wf_update_canvas_diff(wfc);
+			/* Now resize to get full canvas size and room for caption and borders */
+			SetWindowPos(wfc->hwnd, HWND_TOP, wfc->client_x, wfc->client_y,
+				wfc->client_width + wfc->diff.x, wfc->client_height + wfc->diff.y,
+				0 /*SWP_FRAMECHANGED*/);
+		}
+		else
+		{
+			/* Now resize to get full canvas size and room for caption and borders */
+			SetWindowPos(wfc->hwnd, HWND_TOP, 0, 0, settings->DesktopWidth,
+			             settings->DesktopHeight, SWP_FRAMECHANGED);
+			wf_update_canvas_diff(wfc);
+			SetWindowPos(wfc->hwnd, HWND_TOP, -1, -1, settings->DesktopWidth + wfc->diff.x,
+			             settings->DesktopHeight + wfc->diff.y, SWP_NOMOVE | SWP_FRAMECHANGED);
+		}
 	}
 	else
 	{
@@ -397,11 +415,7 @@ void wf_toggle_fullscreen(wfContext* wfc)
 		wfc->disablewindowtracking = TRUE;
 	}
 
-	if (wfc->fullscreen)
-		floatbar_show(wfc->floatbar);
-	else
-		floatbar_hide(wfc->floatbar);
-
+	wf_floatbar_toggle_fullscreen(wfc->floatbar, wfc->fullscreen);
 	SetParent(wfc->hwnd, wfc->fullscreen ? NULL : wfc->hWndParent);
 	wf_resize_window(wfc);
 	ShowWindow(wfc->hwnd, SW_SHOW);

@@ -125,7 +125,6 @@ int schannel_openssl_client_init(SCHANNEL_OPENSSL* context)
 	{
 		WLog_ERR(TAG, "BIO_new failed");
 		goto out_bio_read_failed;
-		return -1;
 	}
 
 	status = BIO_set_write_buf_size(context->bioRead, SCHANNEL_CB_MAX_TOKEN);
@@ -183,10 +182,10 @@ out_write_alloc:
 out_read_alloc:
 out_bio_pair:
 out_set_write_buf_write:
-	BIO_free(context->bioWrite);
+	BIO_free_all(context->bioWrite);
 out_bio_write_failed:
 out_set_write_buf_read:
-	BIO_free(context->bioRead);
+	BIO_free_all(context->bioRead);
 out_bio_read_failed:
 	SSL_free(context->ssl);
 out_ssl_new_failed:
@@ -324,10 +323,10 @@ out_write_buffer:
 out_read_buffer:
 out_bio_pair:
 out_set_write_buf_write:
-	BIO_free(context->bioWrite);
+	BIO_free_all(context->bioWrite);
 out_bio_write:
 out_set_write_buf_read:
-	BIO_free(context->bioRead);
+	BIO_free_all(context->bioRead);
 out_bio_read:
 out_use_certificate:
 	SSL_free(context->ssl);
@@ -460,8 +459,6 @@ SECURITY_STATUS schannel_openssl_server_process_tokens(SCHANNEL_OPENSSL* context
 SECURITY_STATUS schannel_openssl_encrypt_message(SCHANNEL_OPENSSL* context, PSecBufferDesc pMessage)
 {
 	int status;
-	int length;
-	int offset;
 	int ssl_error;
 	PSecBuffer pStreamBodyBuffer;
 	PSecBuffer pStreamHeaderBuffer;
@@ -485,18 +482,21 @@ SECURITY_STATUS schannel_openssl_encrypt_message(SCHANNEL_OPENSSL* context, PSec
 
 	if (status > 0)
 	{
-		offset = 0;
-		length = (pStreamHeaderBuffer->cbBuffer > (unsigned long) status) ? status :
+		size_t ustatus = (size_t)status;
+		size_t length;
+		size_t offset = 0;
+
+		length = (pStreamHeaderBuffer->cbBuffer > ustatus) ? ustatus :
 		         pStreamHeaderBuffer->cbBuffer;
 		CopyMemory(pStreamHeaderBuffer->pvBuffer, &context->ReadBuffer[offset], length);
-		status -= length;
+		ustatus -= length;
 		offset += length;
-		length = (pStreamBodyBuffer->cbBuffer > (unsigned long) status) ? status :
+		length = (pStreamBodyBuffer->cbBuffer > ustatus) ? ustatus :
 		         pStreamBodyBuffer->cbBuffer;
 		CopyMemory(pStreamBodyBuffer->pvBuffer, &context->ReadBuffer[offset], length);
-		status -= length;
+		ustatus -= length;
 		offset += length;
-		length = (pStreamTrailerBuffer->cbBuffer > (unsigned long) status) ? status :
+		length = (pStreamTrailerBuffer->cbBuffer > ustatus) ? ustatus :
 		         pStreamTrailerBuffer->cbBuffer;
 		CopyMemory(pStreamTrailerBuffer->pvBuffer, &context->ReadBuffer[offset], length);
 	}

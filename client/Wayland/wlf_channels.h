@@ -17,8 +17,8 @@
  * limitations under the License.
  */
 
-#ifndef WLF_CHANNELS_H
-#define WLF_CHANNELS_H
+#ifndef FREERDP_CLIENT_WAYLAND_CHANNELS_H
+#define FREERDP_CLIENT_WAYLAND_CHANNELS_H
 
 #include <freerdp/freerdp.h>
 #include <freerdp/client/channels.h>
@@ -34,9 +34,9 @@ int wlf_on_channel_connected(freerdp* instance, const char* name,
 int wlf_on_channel_disconnected(freerdp* instance, const char* name,
                                 void* pInterface);
 
-void wlf_OnChannelConnectedEventHandler(rdpContext* context,
+void wlf_OnChannelConnectedEventHandler(void* context,
                                         ChannelConnectedEventArgs* e);
-void wlf_OnChannelDisconnectedEventHandler(rdpContext* context,
+void wlf_OnChannelDisconnectedEventHandler(void* context,
         ChannelDisconnectedEventArgs* e);
 
-#endif
+#endif /* FREERDP_CLIENT_WAYLAND_CHANNELS_H */

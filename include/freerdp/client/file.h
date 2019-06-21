@@ -140,6 +140,7 @@ struct rdp_file
 	DWORD GatewayUsageMethod; /* gatewayusagemethod */
 	DWORD GatewayProfileUsageMethod; /* gatewayprofileusagemethod */
 	DWORD GatewayCredentialsSource; /* gatewaycredentialssource */
+	LPSTR GatewayAccessToken; /* gatewayaccesstoken */
 
 	DWORD UseRedirectionServerName; /* use redirection server name */
 
@@ -149,6 +150,8 @@ struct rdp_file
 	LPSTR DrivesToRedirect; /* drivestoredirect */
 	LPSTR DevicesToRedirect; /* devicestoredirect */
 	LPSTR WinPosStr; /* winposstr */
+
+	LPSTR PreconnectionBlob; /* pcb */
 
 	int lineCount;
 	int lineSize;

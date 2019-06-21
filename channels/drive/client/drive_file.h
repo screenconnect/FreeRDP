@@ -23,8 +23,8 @@
  * limitations under the License.
  */
 
-#ifndef FREERDP_CHANNEL_DRIVE_FILE_H
-#define FREERDP_CHANNEL_DRIVE_FILE_H
+#ifndef FREERDP_CHANNEL_DRIVE_CLIENT_FILE_H
+#define FREERDP_CHANNEL_DRIVE_CLIENT_FILE_H
 
 #include <winpr/stream.h>
 #include <freerdp/channels/log.h>
@@ -40,7 +40,7 @@ struct _DRIVE_FILE
 	HANDLE file_handle;
 	HANDLE find_handle;
 	WIN32_FIND_DATAW find_data;
-	WCHAR* basepath;
+	const WCHAR* basepath;
 	WCHAR* fullpath;
 	WCHAR* filename;
 	BOOL delete_pending;
@@ -65,7 +65,5 @@ BOOL drive_file_set_information(DRIVE_FILE* file, UINT32 FsInformationClass, UIN
                                 wStream* input);
 BOOL drive_file_query_directory(DRIVE_FILE* file, UINT32 FsInformationClass, BYTE InitialQuery,
                                 const WCHAR* path, UINT32 PathLength, wStream* output);
-
-extern UINT sys_code_page;
 
 #endif /* FREERDP_CHANNEL_DRIVE_FILE_H */

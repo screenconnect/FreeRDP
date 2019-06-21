@@ -1,15 +1,15 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion = rootProject.ext.compileSdk
-    buildToolsVersion = rootProject.ext.buildToolsVersion
+    compileSdkVersion = 28
+    buildToolsVersion = "28.0.3"
 
     defaultConfig {
         applicationId "com.freerdp.afreerdp"
-        minSdkVersion rootProject.ext.minSdk
-        targetSdkVersion rootProject.ext.targetSdk
+        minSdkVersion 21
+        targetSdkVersion 28
         vectorDrawables.useSupportLibrary = true
-        versionCode = rootProject.ext.versionCode
+        versionCode = 15
         versionName = rootProject.ext.versionName
     }
 
@@ -37,5 +37,5 @@ android {
 }
 
 dependencies {
-    compile project(':freeRDPCore')
+    implementation project(':freeRDPCore')
 }

@@ -34,8 +34,32 @@
 
 #include "smartcard_main.h"
 
-void* smartcard_context_thread(SMARTCARD_CONTEXT* pContext)
+#define CAST_FROM_DEVICE(device) cast_device_from(device, __FUNCTION__, __FILE__, __LINE__)
+
+static SMARTCARD_DEVICE* sSmartcard = NULL;
+
+static SMARTCARD_DEVICE* cast_device_from(DEVICE* device, const char* fkt, const char* file,
+        int line)
 {
+	if (!device)
+	{
+		WLog_ERR(TAG, "%s [%s:%d] Called smartcard channel with NULL device", fkt, file, line);
+		return NULL;
+	}
+
+	if (device->type != RDPDR_DTYP_SMARTCARD)
+	{
+		WLog_ERR(TAG, "%s [%s:%d] Called smartcard channel with invalid device of type %"PRIx32,
+		         fkt, file, line, device->type);
+		return NULL;
+	}
+
+	return (SMARTCARD_DEVICE*)device;
+}
+
+static DWORD WINAPI smartcard_context_thread(LPVOID arg)
+{
+	SMARTCARD_CONTEXT* pContext = (SMARTCARD_CONTEXT*)arg;
 	DWORD nCount;
 	LONG status = 0;
 	DWORD waitStatus;
@@ -45,7 +69,6 @@ void* smartcard_context_thread(SMARTCARD_CONTEXT* pContext)
 	SMARTCARD_OPERATION* operation;
 	UINT error = CHANNEL_RC_OK;
 	smartcard = pContext->smartcard;
-
 	nCount = 0;
 	hEvents[nCount++] = MessageQueue_Event(pContext->IrpQueue);
 
@@ -108,8 +131,8 @@ void* smartcard_context_thread(SMARTCARD_CONTEXT* pContext)
 		setChannelError(smartcard->rdpcontext, error,
 		                "smartcard_context_thread reported an error");
 
-	ExitThread((DWORD)status);
-	return NULL;
+	ExitThread(status);
+	return error;
 }
 
 SMARTCARD_CONTEXT* smartcard_context_new(SMARTCARD_DEVICE* smartcard,
@@ -135,7 +158,7 @@ SMARTCARD_CONTEXT* smartcard_context_new(SMARTCARD_DEVICE* smartcard,
 	}
 
 	pContext->thread = CreateThread(NULL, 0,
-	                                (LPTHREAD_START_ROUTINE) smartcard_context_thread,
+	                                smartcard_context_thread,
 	                                pContext, 0, NULL);
 
 	if (!pContext->thread)
@@ -152,8 +175,10 @@ error_irpqueue:
 	return NULL;
 }
 
-void smartcard_context_free(SMARTCARD_CONTEXT* pContext)
+void smartcard_context_free(void* pCtx)
 {
+	SMARTCARD_CONTEXT* pContext = pCtx;
+
 	if (!pContext)
 		return;
 
@@ -168,7 +193,6 @@ void smartcard_context_free(SMARTCARD_CONTEXT* pContext)
 	MessageQueue_Free(pContext->IrpQueue);
 	free(pContext);
 }
-
 
 static void smartcard_release_all_contexts(SMARTCARD_DEVICE* smartcard)
 {
@@ -249,7 +273,29 @@ static void smartcard_release_all_contexts(SMARTCARD_DEVICE* smartcard)
 	}
 }
 
+static UINT smartcard_free_(SMARTCARD_DEVICE* smartcard)
+{
+	if (!smartcard)
+		return CHANNEL_RC_OK;
 
+	if (smartcard->IrpQueue)
+	{
+		MessageQueue_Free(smartcard->IrpQueue);
+		CloseHandle(smartcard->thread);
+	}
+
+	Stream_Free(smartcard->device.data, TRUE);
+	LinkedList_Free(smartcard->names);
+	ListDictionary_Free(smartcard->rgSCardContextList);
+	ListDictionary_Free(smartcard->rgOutstandingMessages);
+	Queue_Free(smartcard->CompletedIrpQueue);
+
+	if (smartcard->StartedEvent)
+		SCardReleaseStartedEvent();
+
+	free(smartcard);
+	return CHANNEL_RC_OK;
+}
 /**
  * Function description
  *
@@ -258,7 +304,11 @@ static void smartcard_release_all_contexts(SMARTCARD_DEVICE* smartcard)
 static UINT smartcard_free(DEVICE* device)
 {
 	UINT error;
-	SMARTCARD_DEVICE* smartcard = (SMARTCARD_DEVICE*) device;
+	SMARTCARD_DEVICE* smartcard = CAST_FROM_DEVICE(device);
+
+	if (!smartcard)
+		return ERROR_INVALID_PARAMETER;
+
 	/**
 	 * Calling smartcard_release_all_contexts to unblock all operations waiting for transactions
 	 * to unlock.
@@ -276,31 +326,12 @@ static UINT smartcard_free(DEVICE* device)
 			WLog_ERR(TAG, "WaitForSingleObject failed with error %"PRIu32"!", error);
 			return error;
 		}
-
-		MessageQueue_Free(smartcard->IrpQueue);
-		smartcard->IrpQueue = NULL;
-		CloseHandle(smartcard->thread);
-		smartcard->thread = NULL;
 	}
 
-	if (smartcard->device.data)
-	{
-		Stream_Free(smartcard->device.data, TRUE);
-		smartcard->device.data = NULL;
-	}
+	if (sSmartcard == smartcard)
+		sSmartcard = NULL;
 
-	ListDictionary_Free(smartcard->rgSCardContextList);
-	ListDictionary_Free(smartcard->rgOutstandingMessages);
-	Queue_Free(smartcard->CompletedIrpQueue);
-
-	if (smartcard->StartedEvent)
-	{
-		SCardReleaseStartedEvent();
-		smartcard->StartedEvent = NULL;
-	}
-
-	free(device);
-	return CHANNEL_RC_OK;
+	return smartcard_free_(smartcard);
 }
 
 /**
@@ -315,7 +346,11 @@ static UINT smartcard_free(DEVICE* device)
  */
 static UINT smartcard_init(DEVICE* device)
 {
-	SMARTCARD_DEVICE* smartcard = (SMARTCARD_DEVICE*) device;
+	SMARTCARD_DEVICE* smartcard = CAST_FROM_DEVICE(device);
+
+	if (!smartcard)
+		return ERROR_INVALID_PARAMETER;
+
 	smartcard_release_all_contexts(smartcard);
 	return CHANNEL_RC_OK;
 }
@@ -325,7 +360,7 @@ static UINT smartcard_init(DEVICE* device)
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT smartcard_complete_irp(SMARTCARD_DEVICE* smartcard, IRP* irp)
+static UINT smartcard_complete_irp(SMARTCARD_DEVICE* smartcard, IRP* irp)
 {
 	void* key;
 	key = (void*)(size_t) irp->CompletionId;
@@ -343,7 +378,7 @@ UINT smartcard_complete_irp(SMARTCARD_DEVICE* smartcard, IRP* irp)
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-UINT smartcard_process_irp(SMARTCARD_DEVICE* smartcard, IRP* irp)
+static UINT smartcard_process_irp(SMARTCARD_DEVICE* smartcard, IRP* irp)
 {
 	void* key;
 	LONG status;
@@ -377,26 +412,28 @@ UINT smartcard_process_irp(SMARTCARD_DEVICE* smartcard, IRP* irp)
 
 			if (!Queue_Enqueue(smartcard->CompletedIrpQueue, (void*) irp))
 			{
+				free(operation);
 				WLog_ERR(TAG, "Queue_Enqueue failed!");
 				return ERROR_INTERNAL_ERROR;
 			}
 
+			free(operation);
 			return CHANNEL_RC_OK;
 		}
 
 		asyncIrp = TRUE;
-
-		/**
-		 * The following matches mstsc's behavior of processing
-		 * only certain requests asynchronously while processing
-		 * those expected to return fast synchronously.
-		 */
 
 		switch (operation->ioControlCode)
 		{
 			case SCARD_IOCTL_ESTABLISHCONTEXT:
 			case SCARD_IOCTL_RELEASECONTEXT:
 			case SCARD_IOCTL_ISVALIDCONTEXT:
+			case SCARD_IOCTL_CANCEL:
+			case SCARD_IOCTL_ACCESSSTARTEDEVENT:
+			case SCARD_IOCTL_RELEASESTARTEDEVENT:
+				asyncIrp = FALSE;
+				break;
+
 			case SCARD_IOCTL_LISTREADERGROUPSA:
 			case SCARD_IOCTL_LISTREADERGROUPSW:
 			case SCARD_IOCTL_LISTREADERSA:
@@ -417,21 +454,14 @@ UINT smartcard_process_irp(SMARTCARD_DEVICE* smartcard, IRP* irp)
 			case SCARD_IOCTL_LOCATECARDSW:
 			case SCARD_IOCTL_LOCATECARDSBYATRA:
 			case SCARD_IOCTL_LOCATECARDSBYATRW:
-			case SCARD_IOCTL_CANCEL:
 			case SCARD_IOCTL_READCACHEA:
 			case SCARD_IOCTL_READCACHEW:
 			case SCARD_IOCTL_WRITECACHEA:
 			case SCARD_IOCTL_WRITECACHEW:
 			case SCARD_IOCTL_GETREADERICON:
 			case SCARD_IOCTL_GETDEVICETYPEID:
-				asyncIrp = FALSE;
-				break;
-
 			case SCARD_IOCTL_GETSTATUSCHANGEA:
 			case SCARD_IOCTL_GETSTATUSCHANGEW:
-				asyncIrp = TRUE;
-				break;
-
 			case SCARD_IOCTL_CONNECTA:
 			case SCARD_IOCTL_CONNECTW:
 			case SCARD_IOCTL_RECONNECT:
@@ -447,11 +477,6 @@ UINT smartcard_process_irp(SMARTCARD_DEVICE* smartcard, IRP* irp)
 			case SCARD_IOCTL_SETATTRIB:
 			case SCARD_IOCTL_GETTRANSMITCOUNT:
 				asyncIrp = TRUE;
-				break;
-
-			case SCARD_IOCTL_ACCESSSTARTEDEVENT:
-			case SCARD_IOCTL_RELEASESTARTEDEVENT:
-				asyncIrp = FALSE;
 				break;
 		}
 
@@ -472,6 +497,7 @@ UINT smartcard_process_irp(SMARTCARD_DEVICE* smartcard, IRP* irp)
 
 			if (!Queue_Enqueue(smartcard->CompletedIrpQueue, (void*) irp))
 			{
+				free(operation);
 				WLog_ERR(TAG, "Queue_Enqueue failed!");
 				return ERROR_INTERNAL_ERROR;
 			}
@@ -507,15 +533,18 @@ UINT smartcard_process_irp(SMARTCARD_DEVICE* smartcard, IRP* irp)
 	return CHANNEL_RC_OK;
 }
 
-static void* smartcard_thread_func(void* arg)
+static DWORD WINAPI smartcard_thread_func(LPVOID arg)
 {
 	IRP* irp;
 	DWORD nCount;
 	DWORD status;
 	HANDLE hEvents[2];
 	wMessage message;
-	SMARTCARD_DEVICE* smartcard = (SMARTCARD_DEVICE*) arg;
 	UINT error = CHANNEL_RC_OK;
+	SMARTCARD_DEVICE* smartcard = CAST_FROM_DEVICE(arg);
+
+	if (!smartcard)
+		return ERROR_INVALID_PARAMETER;
 
 	nCount = 0;
 	hEvents[nCount++] = MessageQueue_Event(smartcard->IrpQueue);
@@ -659,8 +688,8 @@ out:
 		setChannelError(smartcard->rdpcontext, error,
 		                "smartcard_thread_func reported an error");
 
-	ExitThread((DWORD)error);
-	return NULL;
+	ExitThread(error);
+	return error;
 }
 
 /**
@@ -670,7 +699,10 @@ out:
  */
 static UINT smartcard_irp_request(DEVICE* device, IRP* irp)
 {
-	SMARTCARD_DEVICE* smartcard = (SMARTCARD_DEVICE*) device;
+	SMARTCARD_DEVICE* smartcard = CAST_FROM_DEVICE(device);
+
+	if (!smartcard)
+		return ERROR_INVALID_PARAMETER;
 
 	if (!MessageQueue_Post(smartcard->IrpQueue, NULL, 0, (void*) irp, NULL))
 	{
@@ -691,122 +723,101 @@ static UINT smartcard_irp_request(DEVICE* device, IRP* irp)
  */
 UINT DeviceServiceEntry(PDEVICE_SERVICE_ENTRY_POINTS pEntryPoints)
 {
-	char* name;
-	char* path;
+	SMARTCARD_DEVICE* smartcard = NULL;
 	size_t length;
-	int ck;
-	RDPDR_SMARTCARD* device;
-	SMARTCARD_DEVICE* smartcard;
 	UINT error = CHANNEL_RC_NO_MEMORY;
-	device = (RDPDR_SMARTCARD*) pEntryPoints->device;
-	name = device->Name;
-	path = device->Path;
-	smartcard = (SMARTCARD_DEVICE*) calloc(1, sizeof(SMARTCARD_DEVICE));
 
-	if (!smartcard)
+	if (!sSmartcard)
 	{
-		WLog_ERR(TAG, "calloc failed!");
-		return CHANNEL_RC_NO_MEMORY;
+		wObject* obj;
+		smartcard = (SMARTCARD_DEVICE*) calloc(1, sizeof(SMARTCARD_DEVICE));
+
+		if (!smartcard)
+		{
+			WLog_ERR(TAG, "calloc failed!");
+			return CHANNEL_RC_NO_MEMORY;
+		}
+
+		smartcard->device.type = RDPDR_DTYP_SMARTCARD;
+		smartcard->device.name = "SCARD";
+		smartcard->device.IRPRequest = smartcard_irp_request;
+		smartcard->device.Init = smartcard_init;
+		smartcard->device.Free = smartcard_free;
+		smartcard->names = LinkedList_New();
+		smartcard->rdpcontext = pEntryPoints->rdpcontext;
+		length = strlen(smartcard->device.name);
+		smartcard->device.data = Stream_New(NULL, length + 1);
+
+		if (!smartcard->device.data || !smartcard->names)
+		{
+			WLog_ERR(TAG, "Stream_New failed!");
+			goto fail;
+		}
+
+		Stream_Write(smartcard->device.data, "SCARD", 6);
+		smartcard->IrpQueue = MessageQueue_New(NULL);
+
+		if (!smartcard->IrpQueue)
+		{
+			WLog_ERR(TAG, "MessageQueue_New failed!");
+			goto fail;
+		}
+
+		smartcard->CompletedIrpQueue = Queue_New(TRUE, -1, -1);
+
+		if (!smartcard->CompletedIrpQueue)
+		{
+			WLog_ERR(TAG, "Queue_New failed!");
+			goto fail;
+		}
+
+		smartcard->rgSCardContextList = ListDictionary_New(TRUE);
+
+		if (!smartcard->rgSCardContextList)
+		{
+			WLog_ERR(TAG, "ListDictionary_New failed!");
+			goto fail;
+		}
+
+		obj = ListDictionary_ValueObject(smartcard->rgSCardContextList);
+		obj->fnObjectFree = smartcard_context_free;
+		smartcard->rgOutstandingMessages = ListDictionary_New(TRUE);
+
+		if (!smartcard->rgOutstandingMessages)
+		{
+			WLog_ERR(TAG, "ListDictionary_New failed!");
+			goto fail;
+		}
+
+		if ((error = pEntryPoints->RegisterDevice(pEntryPoints->devman, &smartcard->device)))
+		{
+			WLog_ERR(TAG, "RegisterDevice failed!");
+			goto fail;
+		}
+
+		smartcard->thread = CreateThread(NULL, 0,
+		                                 smartcard_thread_func,
+		                                 smartcard, CREATE_SUSPENDED, NULL);
+
+		if (!smartcard->thread)
+		{
+			WLog_ERR(TAG, "ListDictionary_New failed!");
+			error = ERROR_INTERNAL_ERROR;
+			goto fail;
+		}
+
+		ResumeThread(smartcard->thread);
 	}
+	else
+		smartcard = sSmartcard;
 
-	smartcard->device.type = RDPDR_DTYP_SMARTCARD;
-	smartcard->device.name = "SCARD";
-	smartcard->device.IRPRequest = smartcard_irp_request;
-	smartcard->device.Init = smartcard_init;
-	smartcard->device.Free = smartcard_free;
-	smartcard->rdpcontext = pEntryPoints->rdpcontext;
-	length = strlen(smartcard->device.name);
-	smartcard->device.data = Stream_New(NULL, length + 1);
+	if (pEntryPoints->device->Name)
+		LinkedList_AddLast(smartcard->names, pEntryPoints->device->Name);
 
-	if (!smartcard->device.data)
-	{
-		WLog_ERR(TAG, "Stream_New failed!");
-		goto error_device_data;
-	}
-
-	Stream_Write(smartcard->device.data, "SCARD", 6);
-	smartcard->name = NULL;
-	smartcard->path = NULL;
-
-	if (path)
-	{
-		smartcard->path = path;
-		smartcard->name = name;
-	}
-	else if (name)
-	{
-		if (1 == sscanf(name, "%d", &ck))
-			smartcard->path = name;
-		else
-			smartcard->name = name;
-	}
-
-	smartcard->IrpQueue = MessageQueue_New(NULL);
-
-	if (!smartcard->IrpQueue)
-	{
-		WLog_ERR(TAG, "MessageQueue_New failed!");
-		goto error_irp_queue;
-	}
-
-	smartcard->CompletedIrpQueue = Queue_New(TRUE, -1, -1);
-
-	if (!smartcard->CompletedIrpQueue)
-	{
-		WLog_ERR(TAG, "Queue_New failed!");
-		goto error_completed_irp_queue;
-	}
-
-	smartcard->rgSCardContextList = ListDictionary_New(TRUE);
-
-	if (!smartcard->rgSCardContextList)
-	{
-		WLog_ERR(TAG, "ListDictionary_New failed!");
-		goto error_context_list;
-	}
-
-	ListDictionary_ValueObject(smartcard->rgSCardContextList)->fnObjectFree =
-	    (OBJECT_FREE_FN) smartcard_context_free;
-	smartcard->rgOutstandingMessages = ListDictionary_New(TRUE);
-
-	if (!smartcard->rgOutstandingMessages)
-	{
-		WLog_ERR(TAG, "ListDictionary_New failed!");
-		goto error_outstanding_messages;
-	}
-
-	if ((error = pEntryPoints->RegisterDevice(pEntryPoints->devman,
-	             (DEVICE*) smartcard)))
-	{
-		WLog_ERR(TAG, "RegisterDevice failed!");
-		goto error_outstanding_messages;
-	}
-
-	smartcard->thread = CreateThread(NULL, 0,
-	                                 (LPTHREAD_START_ROUTINE) smartcard_thread_func,
-	                                 smartcard, CREATE_SUSPENDED, NULL);
-
-	if (!smartcard->thread)
-	{
-		WLog_ERR(TAG, "ListDictionary_New failed!");
-		error = ERROR_INTERNAL_ERROR;
-		goto error_thread;
-	}
-
-	ResumeThread(smartcard->thread);
+	sSmartcard = smartcard;
 	return CHANNEL_RC_OK;
-error_thread:
-	ListDictionary_Free(smartcard->rgOutstandingMessages);
-error_outstanding_messages:
-	ListDictionary_Free(smartcard->rgSCardContextList);
-error_context_list:
-	Queue_Free(smartcard->CompletedIrpQueue);
-error_completed_irp_queue:
-	MessageQueue_Free(smartcard->IrpQueue);
-error_irp_queue:
-	Stream_Free(smartcard->device.data, TRUE);
-error_device_data:
-	free(smartcard);
+fail:
+	smartcard_free_(smartcard);
 	return error;
 }
 

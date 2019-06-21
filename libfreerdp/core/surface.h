@@ -17,8 +17,8 @@
  * limitations under the License.
  */
 
-#ifndef __SURFACE
-#define __SURFACE
+#ifndef FREERDP_LIB_CORE_SURFACE_H
+#define FREERDP_LIB_CORE_SURFACE_H
 
 #include "rdp.h"
 
@@ -35,13 +35,12 @@ enum SURFCMD_CMDTYPE
 	CMDTYPE_STREAM_SURFACE_BITS = 0x0006
 };
 
-FREERDP_LOCAL int update_recv_surfcmds(rdpUpdate* update, UINT32 size,
-                                       wStream* s);
+FREERDP_LOCAL int update_recv_surfcmds(rdpUpdate* update, wStream* s);
 
-FREERDP_LOCAL BOOL update_write_surfcmd_surface_bits_header(wStream* s,
+FREERDP_LOCAL BOOL update_write_surfcmd_surface_bits(wStream* s,
         const SURFACE_BITS_COMMAND* cmd);
 FREERDP_LOCAL BOOL update_write_surfcmd_frame_marker(wStream* s,
         UINT16 frameAction, UINT32 frameId);
 
-#endif /* __SURFACE */
+#endif /* FREERDP_LIB_CORE_SURFACE_H */
 

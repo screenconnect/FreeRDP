@@ -17,20 +17,20 @@
  * limitations under the License.
  */
 
-#ifndef WF_INPUT_H
-#define WF_INPUT_H
+#ifndef FREERDP_SERVER_WIN_INPUT_H
+#define FREERDP_SERVER_WIN_INPUT_H
 
 #include "wf_interface.h"
 
-void wf_peer_keyboard_event(rdpInput* input, UINT16 flags, UINT16 code);
-void wf_peer_unicode_keyboard_event(rdpInput* input, UINT16 flags, UINT16 code);
-void wf_peer_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y);
-void wf_peer_extended_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y);
+BOOL wf_peer_keyboard_event(rdpInput* input, UINT16 flags, UINT16 code);
+BOOL wf_peer_unicode_keyboard_event(rdpInput* input, UINT16 flags, UINT16 code);
+BOOL wf_peer_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y);
+BOOL wf_peer_extended_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y);
 
 //dummy versions
-void wf_peer_keyboard_event_dummy(rdpInput* input, UINT16 flags, UINT16 code);
-void wf_peer_unicode_keyboard_event_dummy(rdpInput* input, UINT16 flags, UINT16 code);
-void wf_peer_mouse_event_dummy(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y);
-void wf_peer_extended_mouse_event_dummy(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y);
+BOOL wf_peer_keyboard_event_dummy(rdpInput* input, UINT16 flags, UINT16 code);
+BOOL wf_peer_unicode_keyboard_event_dummy(rdpInput* input, UINT16 flags, UINT16 code);
+BOOL wf_peer_mouse_event_dummy(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y);
+BOOL wf_peer_extended_mouse_event_dummy(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y);
 
-#endif /* WF_INPUT_H */
+#endif /* FREERDP_SERVER_WIN_INPUT_H */

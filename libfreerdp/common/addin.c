@@ -27,6 +27,7 @@
 
 #include <winpr/crt.h>
 #include <winpr/path.h>
+#include <winpr/string.h>
 #include <winpr/library.h>
 
 #include <freerdp/addin.h>
@@ -188,7 +189,7 @@ PVIRTUALCHANNELENTRY freerdp_load_dynamic_addin(LPCSTR pszFileName,
 		if (!pszRelativeFilePath)
 			goto fail;
 
-		sprintf_s(pszRelativeFilePath, relPathLen, "%s", pszRelativeFilePath);
+		sprintf_s(pszRelativeFilePath, relPathLen, "%s", pszPath);
 		NativePathCchAppendA(pszRelativeFilePath, relPathLen, pszAddinFile);
 	}
 	else
@@ -233,19 +234,19 @@ fail:
 }
 
 PVIRTUALCHANNELENTRY freerdp_load_dynamic_channel_addin_entry(LPCSTR pszName,
-        LPSTR pszSubsystem, LPSTR pszType, DWORD dwFlags)
+        LPCSTR pszSubsystem, LPCSTR pszType, DWORD dwFlags)
 {
 	PVIRTUALCHANNELENTRY entry;
 	LPSTR pszFileName;
-	size_t cchFileName = sizeof(FREERDP_SHARED_LIBRARY_PREFIX) + 32;
+	const size_t cchBaseFileName = sizeof(FREERDP_SHARED_LIBRARY_PREFIX) + 32;
 	LPCSTR pszExtension;
 	LPCSTR pszPrefix = FREERDP_SHARED_LIBRARY_PREFIX;
 	pszExtension = PathGetSharedLibraryExtensionA(0);
 
 	if (pszName && pszSubsystem && pszType)
 	{
-		cchFileName += strlen(pszName) + strlen(pszSubsystem) + strlen(
-		                   pszType) + strlen(pszExtension);
+		const size_t cchFileName = cchBaseFileName + strlen(pszName) + strlen(pszSubsystem) + strlen(
+		                               pszType) + strlen(pszExtension);
 		pszFileName = (LPSTR) malloc(cchFileName);
 
 		if (!pszFileName)
@@ -253,11 +254,11 @@ PVIRTUALCHANNELENTRY freerdp_load_dynamic_channel_addin_entry(LPCSTR pszName,
 
 		sprintf_s(pszFileName, cchFileName, "%s%s-client-%s-%s.%s", pszPrefix, pszName,
 		          pszSubsystem, pszType, pszExtension);
-		cchFileName = strlen(pszFileName);
 	}
 	else if (pszName && pszSubsystem)
 	{
-		cchFileName += strlen(pszName) + strlen(pszSubsystem) + strlen(pszExtension);
+		const size_t cchFileName = cchBaseFileName + strlen(pszName) + strlen(pszSubsystem) + strlen(
+		                               pszExtension);
 		pszFileName = (LPSTR) malloc(cchFileName);
 
 		if (!pszFileName)
@@ -265,11 +266,10 @@ PVIRTUALCHANNELENTRY freerdp_load_dynamic_channel_addin_entry(LPCSTR pszName,
 
 		sprintf_s(pszFileName, cchFileName, "%s%s-client-%s.%s", pszPrefix, pszName,
 		          pszSubsystem, pszExtension);
-		cchFileName = strlen(pszFileName);
 	}
 	else if (pszName)
 	{
-		cchFileName += strlen(pszName) + strlen(pszExtension);
+		const size_t cchFileName = cchBaseFileName + strlen(pszName) + strlen(pszExtension);
 		pszFileName = (LPSTR) malloc(cchFileName);
 
 		if (!pszFileName)
@@ -277,7 +277,6 @@ PVIRTUALCHANNELENTRY freerdp_load_dynamic_channel_addin_entry(LPCSTR pszName,
 
 		sprintf_s(pszFileName, cchFileName, "%s%s-client.%s", pszPrefix, pszName,
 		          pszExtension);
-		cchFileName = strlen(pszFileName);
 	}
 	else
 	{
@@ -337,7 +336,7 @@ int freerdp_register_addin_provider(FREERDP_LOAD_CHANNEL_ADDIN_ENTRY_FN
 }
 
 PVIRTUALCHANNELENTRY freerdp_load_channel_addin_entry(LPCSTR pszName,
-        LPSTR pszSubsystem, LPSTR pszType, DWORD dwFlags)
+        LPCSTR pszSubsystem, LPCSTR pszType, DWORD dwFlags)
 {
 	PVIRTUALCHANNELENTRY entry = NULL;
 

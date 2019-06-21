@@ -5,7 +5,6 @@ Download and install full 32- and 64-bit versions of OpenSSL using the following
     https://slproweb.com/download/Win32OpenSSL-1_1_0f.exe
     https://slproweb.com/download/Win64OpenSSL-1_1_0f.exe
 
-
 Download and install CMake using the following link: https://cmake.org/files/v3.9/cmake-3.9.0-win64-x64.msi
 
 NOTE: Version 1.1.0+ of OpenSSL changed library names:
@@ -21,8 +20,9 @@ Check and update FreeRDP\cmake\FindOpenSSL.cmake if necessary before proceeding
 
 Navigate to your local copy of the FreeRDP repo and execute the following command to build the FreeRDP Visual Studio solution:
 
-    cmake .
+    cmake . -G"Visual Studio 16" -A"Win32" 
 
+NOTE: this creates project files for VS 2019, targeting Win32 architecture.
 NOTE: cmake will build the solution files required to compile FreeRDP for Windows; however, the solution files are not portable, and contain references to the absolute location of FreeRDP project files
 
 Import the Bridge project into the newly created solution. The Bridge project is in /Bridge.

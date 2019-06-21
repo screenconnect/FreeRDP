@@ -25,15 +25,22 @@ include_directories(${CMAKE_SOURCE_DIR}/uwac/include)
 set(${MODULE_PREFIX}_SRCS
     wlfreerdp.c
 	wlfreerdp.h
+	wlf_disp.c
+	wlf_disp.h
+	wlf_pointer.c
+	wlf_pointer.h
 	wlf_input.c
 	wlf_input.h
+	wlf_cliprdr.c
+	wlf_cliprdr.h
 	wlf_channels.c
 	wlf_channels.h
 	)
 
+list (APPEND ${MODULE_PREFIX}_LIBS freerdp-client freerdp uwac)
+
 add_executable(${MODULE_NAME} ${${MODULE_PREFIX}_SRCS})
 
-set(${MODULE_PREFIX}_LIBS ${${MODULE_PREFIX}_LIBS} freerdp-client freerdp uwac)
 target_link_libraries(${MODULE_NAME} ${${MODULE_PREFIX}_LIBS})
 
 install(TARGETS ${MODULE_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT client)

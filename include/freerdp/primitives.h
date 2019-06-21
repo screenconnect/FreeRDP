@@ -17,8 +17,8 @@
 # pragma once
 #endif
 
-#ifndef __PRIMITIVES_H_INCLUDED__
-#define __PRIMITIVES_H_INCLUDED__
+#ifndef FREERDP_PRIMITIVES_H
+#define FREERDP_PRIMITIVES_H
 
 #include <freerdp/api.h>
 #include <freerdp/types.h>
@@ -254,6 +254,7 @@ typedef struct
 	__YUV444SplitToYUV420_t YUV444SplitToYUV420;
 	__YUV444ToRGB_8u_P3AC4R_t YUV444ToRGB_8u_P3AC4R;
 	__RGBToAVC444YUV_t RGBToAVC444YUV;
+	__RGBToAVC444YUV_t RGBToAVC444YUVv2;
 } primitives_t;
 
 #ifdef __cplusplus
@@ -267,4 +268,4 @@ FREERDP_API primitives_t* primitives_get_generic(void);
 }
 #endif
 
-#endif /* !__PRIMITIVES_H_INCLUDED__ */
+#endif /* FREERDP_PRIMITIVES_H */

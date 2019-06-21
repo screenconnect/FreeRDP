@@ -1,3 +1,9 @@
+#ninja
+.ninja_deps
+.ninja_log
+build.ninja
+rules.ninja
+
 # CMake
 CMakeFiles/
 CMakeScripts/
@@ -80,6 +86,8 @@ RelWithDebInfo
 *.embed.manifest*
 *.intermediate.manifest*
 version.rc
+*.VC.db
+*.VC.opendb
 .vs/
 
 # Binaries
@@ -94,10 +102,10 @@ cunit/test_freerdp
 client/X11/xfreerdp
 client/Mac/xcode
 client/Sample/sfreerdp
-client/DirectFB/dfreerdp
 client/Wayland/wlfreerdp
 server/Sample/sfreerdp-server
 server/X11/xfreerdp-server
+server/proxy/freerdp-proxy
 xcode
 libfreerdp/codec/test/TestOpenH264ASM
 
@@ -125,7 +133,7 @@ TAGS
 # generated packages
 *.zip
 *.exe
-*.sh
+#*.sh
 *.deb
 *.rpm
 *.dmg
@@ -133,10 +141,15 @@ TAGS
 *.tar.gz
 
 # packaging related files
-!packaging/scripts/prepare_deb_freerdp-nightly.sh
+!packaging/**.sh
 packaging/deb/freerdp-nightly/freerdp-nightly
 packaging/deb/freerdp-nightly/freerdp-nightly-dev
 packaging/deb/freerdp-nightly/freerdp-nightly-dbg
+.source_version
 
 #
 .idea
+
+# VisualStudio Code
+.vscode
+cache/

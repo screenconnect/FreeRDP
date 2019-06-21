@@ -39,13 +39,13 @@
 static BOOL freerdp_client_common_new(freerdp* instance, rdpContext* context)
 {
 	RDP_CLIENT_ENTRY_POINTS* pEntryPoints = instance->pClientEntryPoints;
-	return pEntryPoints->ClientNew(instance, context);
+	return IFCALLRESULT(TRUE, pEntryPoints->ClientNew, instance, context);
 }
 
 static void freerdp_client_common_free(freerdp* instance, rdpContext* context)
 {
 	RDP_CLIENT_ENTRY_POINTS* pEntryPoints = instance->pClientEntryPoints;
-	pEntryPoints->ClientFree(instance, context);
+	IFCALL(pEntryPoints->ClientFree, instance, context);
 }
 
 /* Common API */
@@ -303,27 +303,44 @@ out:
 }
 
 int freerdp_client_settings_parse_assistance_file(rdpSettings* settings,
-        const char* filename)
+        int argc, char* argv[])
 {
-	int status;
+	int status, x;
+	int ret = -1;
+	char* filename;
+	char* password = NULL;
 	rdpAssistanceFile* file;
+
+	if (!settings || !argv || (argc < 2))
+		return -1;
+
+	filename = argv[1];
+
+	for (x = 2; x < argc; x++)
+	{
+		const char* key = strstr(argv[x], "assistance:");
+
+		if (key)
+			password = strchr(key, ':') + 1;
+	}
+
 	file = freerdp_assistance_file_new();
 
 	if (!file)
 		return -1;
 
-	status = freerdp_assistance_parse_file(file, filename);
+	status = freerdp_assistance_parse_file(file, filename, password);
 
 	if (status < 0)
-		return -1;
+		goto out;
 
-	status = freerdp_client_populate_settings_from_assistance_file(file, settings);
+	if (!freerdp_assistance_populate_settings_from_assistance_file(file, settings))
+		goto out;
 
-	if (status < 0)
-		return -1;
-
+	ret = 0;
+out:
 	freerdp_assistance_file_free(file);
-	return 0;
+	return ret;
 }
 
 /** Callback set in the rdp_freerdp structure, and used to get the user's password,
@@ -422,6 +439,12 @@ fail:
 BOOL client_cli_authenticate(freerdp* instance, char** username,
                              char** password, char** domain)
 {
+	if (instance->settings->SmartcardLogon)
+	{
+		WLog_INFO(TAG, "Authentication via smartcard");
+		return TRUE;
+	}
+
 	return client_cli_authenticate_raw(instance, FALSE, username, password, domain);
 }
 
@@ -483,6 +506,7 @@ static DWORD client_cli_accept_certificate(rdpSettings* settings)
  *  when the connection requires it.
  *  This function will actually be called by tls_verify_certificate().
  *  @see rdp_client_connect() and tls_connect()
+ *  @deprecated Use client_cli_verify_certificate_ex
  *  @param instance - pointer to the rdp_freerdp structure that contains the connection settings
  *  @param common_name
  *  @param subject
@@ -495,13 +519,56 @@ DWORD client_cli_verify_certificate(freerdp* instance, const char* common_name,
                                     const char* subject, const char* issuer,
                                     const char* fingerprint, BOOL host_mismatch)
 {
+	WINPR_UNUSED(common_name);
+	WINPR_UNUSED(host_mismatch);
+
+	printf("WARNING: This callback is deprecated, migrate to client_cli_verify_certificate_ex\n");
 	printf("Certificate details:\n");
 	printf("\tSubject: %s\n", subject);
 	printf("\tIssuer: %s\n", issuer);
 	printf("\tThumbprint: %s\n", fingerprint);
 	printf("The above X.509 certificate could not be verified, possibly because you do not have\n"
 	       "the CA certificate in your certificate store, or the certificate has expired.\n"
-	       "Please look at the documentation on how to create local certificate store for a private CA.\n");
+	       "Please look at the OpenSSL documentation on how to add a private CA to the store.\n");
+	return client_cli_accept_certificate(instance->settings);
+}
+
+/** Callback set in the rdp_freerdp structure, and used to make a certificate validation
+ *  when the connection requires it.
+ *  This function will actually be called by tls_verify_certificate().
+ *  @see rdp_client_connect() and tls_connect()
+ *  @param instance     pointer to the rdp_freerdp structure that contains the connection settings
+ *  @param host         The host currently connecting to
+ *  @param port         The port currently connecting to
+ *  @param common_name  The common name of the certificate, should match host or an alias of it
+ *  @param subject      The subject of the certificate
+ *  @param issuer       The certificate issuer name
+ *  @param fingerprint  The fingerprint of the certificate
+ *  @param flags        See VERIFY_CERT_FLAG_* for possible values.
+ *
+ *  @return 1 if the certificate is trusted, 2 if temporary trusted, 0 otherwise.
+ */
+DWORD client_cli_verify_certificate_ex(freerdp* instance, const char* host, UINT16 port,
+                                       const char* common_name,
+                                       const char* subject, const char* issuer,
+                                       const char* fingerprint, DWORD flags)
+{
+	const char* type = "RDP-Server";
+
+	if (flags & VERIFY_CERT_FLAG_GATEWAY)
+		type = "RDP-Gateway";
+
+	if (flags & VERIFY_CERT_FLAG_REDIRECT)
+		type = "RDP-Redirect";
+
+	printf("Certificate details for %s:%"PRIu16" (%s):\n", host, port, type);
+	printf("\tCommon Name: %s\n", common_name);
+	printf("\tSubject:     %s\n", subject);
+	printf("\tIssuer:      %s\n", issuer);
+	printf("\tThumbprint:  %s\n", fingerprint);
+	printf("The above X.509 certificate could not be verified, possibly because you do not have\n"
+	       "the CA certificate in your certificate store, or the certificate has expired.\n"
+	       "Please look at the OpenSSL documentation on how to add a private CA to the store.\n");
 	return client_cli_accept_certificate(instance->settings);
 }
 
@@ -509,6 +576,7 @@ DWORD client_cli_verify_certificate(freerdp* instance, const char* common_name,
  *  when a stored certificate does not match the remote counterpart.
  *  This function will actually be called by tls_verify_certificate().
  *  @see rdp_client_connect() and tls_connect()
+ *  @deprecated Use client_cli_verify_changed_certificate_ex
  *  @param instance - pointer to the rdp_freerdp structure that contains the connection settings
  *  @param common_name
  *  @param subject
@@ -526,6 +594,9 @@ DWORD client_cli_verify_changed_certificate(freerdp* instance,
         const char* old_subject, const char* old_issuer,
         const char* old_fingerprint)
 {
+	WINPR_UNUSED(common_name);
+
+	printf("WARNING: This callback is deprecated, migrate to client_cli_verify_changed_certificate_ex\n");
 	printf("!!! Certificate has changed !!!\n");
 	printf("\n");
 	printf("New Certificate details:\n");
@@ -542,6 +613,119 @@ DWORD client_cli_verify_changed_certificate(freerdp* instance,
 	       "This may indicate that the certificate has been tampered with.\n"
 	       "Please contact the administrator of the RDP server and clarify.\n");
 	return client_cli_accept_certificate(instance->settings);
+}
+
+/** Callback set in the rdp_freerdp structure, and used to make a certificate validation
+ *  when a stored certificate does not match the remote counterpart.
+ *  This function will actually be called by tls_verify_certificate().
+ *  @see rdp_client_connect() and tls_connect()
+ *  @param instance        pointer to the rdp_freerdp structure that contains the connection settings
+ *  @param host            The host currently connecting to
+ *  @param port            The port currently connecting to
+ *  @param common_name     The common name of the certificate, should match host or an alias of it
+ *  @param subject         The subject of the certificate
+ *  @param issuer          The certificate issuer name
+ *  @param fingerprint     The fingerprint of the certificate
+ *  @param old_subject     The subject of the previous certificate
+ *  @param old_issuer      The previous certificate issuer name
+ *  @param old_fingerprint The fingerprint of the previous certificate
+ *  @param flags           See VERIFY_CERT_FLAG_* for possible values.
+ *
+ *  @return 1 if the certificate is trusted, 2 if temporary trusted, 0 otherwise.
+ */
+DWORD client_cli_verify_changed_certificate_ex(freerdp* instance,
+        const char* host, UINT16 port,
+        const char* common_name,
+        const char* subject, const char* issuer,
+        const char* fingerprint,
+        const char* old_subject, const char* old_issuer,
+        const char* old_fingerprint, DWORD flags)
+{
+	const char* type = "RDP-Server";
+
+	if (flags & VERIFY_CERT_FLAG_GATEWAY)
+		type = "RDP-Gateway";
+
+	if (flags & VERIFY_CERT_FLAG_REDIRECT)
+		type = "RDP-Redirect";
+
+	printf("!!!Certificate for %s:%"PRIu16" (%s) has changed!!!\n", host, port, type);
+	printf("\n");
+	printf("New Certificate details:\n");
+	printf("\tCommon Name: %s\n", common_name);
+	printf("\tSubject:     %s\n", subject);
+	printf("\tIssuer:      %s\n", issuer);
+	printf("\tThumbprint:  %s\n", fingerprint);
+	printf("\n");
+	printf("Old Certificate details:\n");
+	printf("\tSubject:     %s\n", old_subject);
+	printf("\tIssuer:      %s\n", old_issuer);
+	printf("\tThumbprint:  %s\n", old_fingerprint);
+	printf("\n");
+	printf("The above X.509 certificate does not match the certificate used for previous connections.\n"
+	       "This may indicate that the certificate has been tampered with.\n"
+	       "Please contact the administrator of the RDP server and clarify.\n");
+	return client_cli_accept_certificate(instance->settings);
+}
+
+BOOL client_auto_reconnect(freerdp* instance)
+{
+	return client_auto_reconnect_ex(instance, NULL);
+}
+
+BOOL client_auto_reconnect_ex(freerdp* instance, BOOL(*window_events)(freerdp* instance))
+{
+	UINT32 maxRetries;
+	UINT32 numRetries = 0;
+	rdpSettings* settings;
+
+	if (!instance || !instance->settings)
+		return FALSE;
+
+	settings = instance->settings;
+	maxRetries = settings->AutoReconnectMaxRetries;
+
+	/* Only auto reconnect on network disconnects. */
+	if (freerdp_error_info(instance) != 0)
+		return FALSE;
+
+	/* A network disconnect was detected */
+	WLog_INFO(TAG, "Network disconnect!");
+
+	if (!settings->AutoReconnectionEnabled)
+	{
+		/* No auto-reconnect - just quit */
+		return FALSE;
+	}
+
+	/* Perform an auto-reconnect. */
+	while (TRUE)
+	{
+		UINT32 x;
+
+		/* Quit retrying if max retries has been exceeded */
+		if ((maxRetries > 0) && (numRetries++ >= maxRetries))
+		{
+			return FALSE;
+		}
+
+		/* Attempt the next reconnect */
+		WLog_INFO(TAG, "Attempting reconnect (%"PRIu32" of %"PRIu32")", numRetries, maxRetries);
+
+		if (freerdp_reconnect(instance))
+			return TRUE;
+
+		for (x = 0; x < 50; x++)
+		{
+			if (!IFCALLRESULT(TRUE, window_events, instance))
+				return FALSE;
+
+			Sleep(100);
+		}
+	}
+
+	WLog_ERR(TAG, "Maximum reconnect retries exceeded");
+	return FALSE;
 }
 
 

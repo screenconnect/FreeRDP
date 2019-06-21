@@ -1,9 +1,10 @@
-
+#include <errno.h>
 #include <winpr/crt.h>
 #include <winpr/tchar.h>
 #include <winpr/cmdline.h>
+#include <winpr/strlst.h>
 
-const char* testArgv[] =
+static const char* testArgv[] =
 {
 	"mstsc.exe",
 	"+z",
@@ -14,10 +15,11 @@ const char* testArgv[] =
 	"/multimon",
 	"+fonts",
 	"-wallpaper",
-	"/v:localhost:3389"
+	"/v:localhost:3389",
+	0
 };
 
-COMMAND_LINE_ARGUMENT_A args[] =
+static COMMAND_LINE_ARGUMENT_A args[] =
 {
 	{ "v", COMMAND_LINE_VALUE_REQUIRED, NULL, NULL, NULL, -1, NULL, "destination server" },
 	{ "port", COMMAND_LINE_VALUE_REQUIRED, NULL, NULL, NULL, -1, NULL, "server port" },
@@ -54,23 +56,34 @@ COMMAND_LINE_ARGUMENT_A args[] =
 	{ NULL, 0, NULL, NULL, NULL, -1, NULL, NULL }
 };
 
-#define testArgc (sizeof(testArgv) / sizeof(testArgv[0]))
 
 int TestCmdLine(int argc, char* argv[])
 {
 	int status;
+	int ret = -1;
 	DWORD flags;
-	int width = 0;
-	int height = 0;
+	long width = 0;
+	long height = 0;
 	COMMAND_LINE_ARGUMENT_A* arg;
+        int testArgc;
+        char** command_line;
 
 	flags = COMMAND_LINE_SIGIL_SLASH | COMMAND_LINE_SEPARATOR_COLON | COMMAND_LINE_SIGIL_PLUS_MINUS;
-	status = CommandLineParseArgumentsA(testArgc, testArgv, args, flags, NULL, NULL, NULL);
+        testArgc = string_list_length(testArgv);
+	command_line = string_list_copy(testArgv);
+
+	if (!command_line)
+	{
+		printf("Argument duplication failed (not enough memory?)\n");
+		return ret;
+	}
+
+	status = CommandLineParseArgumentsA(testArgc, command_line, args, flags, NULL, NULL, NULL);
 
 	if (status != 0)
 	{
 		printf("CommandLineParseArgumentsA failure: %d\n", status);
-		return -1;
+		goto out;
 	}
 
 	arg = CommandLineFindArgumentA(args, "w");
@@ -78,7 +91,7 @@ int TestCmdLine(int argc, char* argv[])
 	if (strcmp("1024", arg->Value) != 0)
 	{
 		printf("CommandLineFindArgumentA: unexpected %s value %s\n", arg->Name, arg->Value);
-		return -1;
+		goto out;
 	}
 
 	arg = CommandLineFindArgumentA(args, "h");
@@ -86,7 +99,7 @@ int TestCmdLine(int argc, char* argv[])
 	if (strcmp("768", arg->Value) != 0)
 	{
 		printf("CommandLineFindArgumentA: unexpected %s value %s\n", arg->Name, arg->Value);
-		return -1;
+		goto out;
 	}
 
 	arg = CommandLineFindArgumentA(args, "f");
@@ -94,7 +107,7 @@ int TestCmdLine(int argc, char* argv[])
 	if (arg->Value)
 	{
 		printf("CommandLineFindArgumentA: unexpected %s value\n", arg->Name);
-		return -1;
+		goto out;
 	}
 
 	arg = CommandLineFindArgumentA(args, "admin");
@@ -102,7 +115,7 @@ int TestCmdLine(int argc, char* argv[])
 	if (!arg->Value)
 	{
 		printf("CommandLineFindArgumentA: unexpected %s value\n", arg->Name);
-		return -1;
+		goto out;
 	}
 
 	arg = CommandLineFindArgumentA(args, "multimon");
@@ -110,7 +123,7 @@ int TestCmdLine(int argc, char* argv[])
 	if (!arg->Value)
 	{
 		printf("CommandLineFindArgumentA: unexpected %s value\n", arg->Name);
-		return -1;
+		goto out;
 	}
 
 	arg = CommandLineFindArgumentA(args, "v");
@@ -118,7 +131,7 @@ int TestCmdLine(int argc, char* argv[])
 	if (strcmp("localhost:3389", arg->Value) != 0)
 	{
 		printf("CommandLineFindArgumentA: unexpected %s value %s\n", arg->Name, arg->Value);
-		return -1;
+		goto out;
 	}
 
 	arg = CommandLineFindArgumentA(args, "fonts");
@@ -126,7 +139,7 @@ int TestCmdLine(int argc, char* argv[])
 	if (!arg->Value)
 	{
 		printf("CommandLineFindArgumentA: unexpected %s value\n", arg->Name);
-		return -1;
+		goto out;
 	}
 
 	arg = CommandLineFindArgumentA(args, "wallpaper");
@@ -134,7 +147,7 @@ int TestCmdLine(int argc, char* argv[])
 	if (arg->Value)
 	{
 		printf("CommandLineFindArgumentA: unexpected %s value\n", arg->Name);
-		return -1;
+		goto out;
 	}
 
 	arg = CommandLineFindArgumentA(args, "help");
@@ -142,10 +155,11 @@ int TestCmdLine(int argc, char* argv[])
 	if (arg->Value)
 	{
 		printf("CommandLineFindArgumentA: unexpected %s value\n", arg->Name);
-		return -1;
+		goto out;
 	}
 
 	arg = args;
+	errno = 0;
 
 	do
 	{
@@ -153,35 +167,39 @@ int TestCmdLine(int argc, char* argv[])
 			continue;
 
 		printf("Argument: %s\n", arg->Name);
-
 		CommandLineSwitchStart(arg)
-
 		CommandLineSwitchCase(arg, "v")
 		{
-
 		}
 		CommandLineSwitchCase(arg, "w")
 		{
-			width = atoi(arg->Value);
+			width = strtol(arg->Value, NULL, 0);
+
+			if (errno != 0)
+				goto out;
 		}
 		CommandLineSwitchCase(arg, "h")
 		{
-			height = atoi(arg->Value);
+			height = strtol(arg->Value, NULL, 0);
+
+			if (errno != 0)
+				goto out;
 		}
 		CommandLineSwitchDefault(arg)
 		{
-
 		}
-
 		CommandLineSwitchEnd(arg)
 	}
 	while ((arg = CommandLineFindNextArgumentA(arg)) != NULL);
 
 	if ((width != 1024) || (height != 768))
 	{
-		printf("Unexpected width and height: Actual: (%dx%d), Expected: (1024x768)\n", width, height);
-		return -1;
+		printf("Unexpected width and height: Actual: (%ldx%ld), Expected: (1024x768)\n", width, height);
+		goto out;
 	}
+	ret = 0;
 
-	return 0;
+out:
+    string_list_free(command_line);
+    return ret;
 }

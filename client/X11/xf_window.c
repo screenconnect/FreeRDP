@@ -105,6 +105,16 @@ struct _PropMotifWmHints
 };
 typedef struct _PropMotifWmHints PropMotifWmHints;
 
+static void xf_SetWindowTitleText(xfContext* xfc, Window window, const char* name)
+{
+	const size_t i = strlen(name);
+	XStoreName(xfc->display, window, name);
+	Atom wm_Name = xfc->_NET_WM_NAME;
+	Atom utf8Str = xfc->UTF8_STRING;
+	XChangeProperty(xfc->display, window, wm_Name, utf8Str, 8,
+	                PropModeReplace, (const unsigned char*)name, (int)i);
+}
+
 /**
  * Post an event from the client to the X server
  */
@@ -136,15 +146,24 @@ void xf_SendClientEvent(xfContext* xfc, Window window, Atom atom,
 	va_end(argp);
 }
 
+void xf_SetWindowMinimized(xfContext* xfc, xfWindow* window)
+{
+	XIconifyWindow(xfc->display, window->handle, xfc->screen_number);
+}
+
 void xf_SetWindowFullscreen(xfContext* xfc, xfWindow* window, BOOL fullscreen)
 {
-	int i;
+	UINT32 i;
 	rdpSettings* settings = xfc->context.settings;
 	int startX, startY;
 	UINT32 width = window->width;
 	UINT32 height = window->height;
+	/* xfc->decorations is set by caller depending on settings and whether it is fullscreen or not */
 	window->decorations = xfc->decorations;
+	/* show/hide decorations (e.g. title bar) as guided by xfc->decorations */
 	xf_SetWindowDecorations(xfc, window->handle, window->decorations);
+	DEBUG_X11(TAG, "X window decoration set to %d", (int)window->decorations);
+	xf_floatbar_toggle_fullscreen(xfc->window->floatbar, fullscreen);
 
 	if (fullscreen)
 	{
@@ -152,8 +171,8 @@ void xf_SetWindowFullscreen(xfContext* xfc, xfWindow* window, BOOL fullscreen)
 		xfc->savedHeight = xfc->window->height;
 		xfc->savedPosX = xfc->window->left;
 		xfc->savedPosY = xfc->window->top;
-		startX = settings->DesktopPosX;
-		startY = settings->DesktopPosY;
+		startX = (settings->DesktopPosX != UINT32_MAX) ? settings->DesktopPosX : 0;
+		startY = (settings->DesktopPosY != UINT32_MAX) ? settings->DesktopPosY : 0;
 	}
 	else
 	{
@@ -164,7 +183,7 @@ void xf_SetWindowFullscreen(xfContext* xfc, xfWindow* window, BOOL fullscreen)
 	}
 
 	/* Determine the x,y starting location for the fullscreen window */
-	if (fullscreen && xfc->context.settings->MonitorCount)
+	if (fullscreen)
 	{
 		/* Initialize startX and startY with reasonable values */
 		startX = xfc->context.settings->MonitorDefArray[0].x;
@@ -180,8 +199,35 @@ void xf_SetWindowFullscreen(xfContext* xfc, xfWindow* window, BOOL fullscreen)
 		/* Lastly apply any monitor shift(translation from remote to local coordinate system)
 		 *  to startX and startY values
 		 */
-		startX = startX + xfc->context.settings->MonitorLocalShiftX;
-		startY = startY + xfc->context.settings->MonitorLocalShiftY;
+		startX += xfc->context.settings->MonitorLocalShiftX;
+		startY += xfc->context.settings->MonitorLocalShiftY;
+	}
+
+	/*
+	  It is safe to proceed with simply toogling _NET_WM_STATE_FULLSCREEN window state on the following conditions:
+	       - The window manager supports multiple monitor full screen
+	       - The user requested to use a single monitor to render the remote desktop
+	 */
+	if (xfc->_NET_WM_FULLSCREEN_MONITORS != None || settings->MonitorCount == 1)
+	{
+		xf_ResizeDesktopWindow(xfc, window, width, height);
+
+		if (fullscreen)
+		{
+			/* enter full screen: move the window before adding NET_WM_STATE_FULLSCREEN */
+			XMoveWindow(xfc->display, window->handle, startX, startY);
+		}
+
+		/* Set the fullscreen state */
+		xf_SendClientEvent(xfc, window->handle, xfc->_NET_WM_STATE, 4,
+		                   fullscreen ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE,
+		                   xfc->_NET_WM_STATE_FULLSCREEN, 0, 0);
+
+		if (!fullscreen)
+		{
+			/* leave full screen: move the window after removing NET_WM_STATE_FULLSCREEN */
+			XMoveWindow(xfc->display, window->handle, startX, startY);
+		}
 
 		/* Set monitor bounds */
 		if (settings->MonitorCount > 1)
@@ -194,24 +240,100 @@ void xf_SetWindowFullscreen(xfContext* xfc, xfWindow* window, BOOL fullscreen)
 			                   1);
 		}
 	}
-
-	xf_ResizeDesktopWindow(xfc, window, width, height);
-
-	if (fullscreen)
+	else
 	{
-		/* enter full screen: move the window before adding NET_WM_STATE_FULLSCREEN */
-		XMoveWindow(xfc->display, window->handle, startX, startY);
-	}
+		if (fullscreen)
+		{
+			xf_SetWindowDecorations(xfc, window->handle, FALSE);
 
-	/* Set the fullscreen state */
-	xf_SendClientEvent(xfc, window->handle, xfc->_NET_WM_STATE, 4,
-	                   fullscreen ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE,
-	                   xfc->_NET_WM_STATE_FULLSCREEN, 0, 0);
+			if (xfc->fullscreenMonitors.top)
+			{
+				xf_SendClientEvent(xfc, window->handle, xfc->_NET_WM_STATE, 4,
+				                   _NET_WM_STATE_ADD,
+				                   xfc->fullscreenMonitors.top, 0, 0);
+			}
+			else
+			{
+				XSetWindowAttributes xswa;
+				xswa.override_redirect = True;
+				XChangeWindowAttributes(xfc->display, window->handle, CWOverrideRedirect, &xswa);
+				XRaiseWindow(xfc->display, window->handle);
+				xswa.override_redirect = False;
+				XChangeWindowAttributes(xfc->display, window->handle, CWOverrideRedirect, &xswa);
+			}
 
-	if (!fullscreen)
-	{
-		/* leave full screen: move the window after removing NET_WM_STATE_FULLSCREEN */
-		XMoveWindow(xfc->display, window->handle, startX, startY);
+			/* if window is in maximized state, save and remove */
+			if (xfc->_NET_WM_STATE_MAXIMIZED_VERT != None)
+			{
+				BYTE state;
+				unsigned long nitems;
+				unsigned long bytes;
+				BYTE* prop;
+
+				if (xf_GetWindowProperty(xfc, window->handle, xfc->_NET_WM_STATE, 255, &nitems, &bytes, &prop))
+				{
+					state = 0;
+
+					while (nitems-- > 0)
+					{
+						if (((Atom*) prop)[nitems] == xfc->_NET_WM_STATE_MAXIMIZED_VERT)
+							state |= 0x01;
+
+						if (((Atom*) prop)[nitems] == xfc->_NET_WM_STATE_MAXIMIZED_HORZ)
+							state |= 0x02;
+					}
+
+					if (state)
+					{
+						xf_SendClientEvent(xfc, window->handle, xfc->_NET_WM_STATE, 4,
+						                   _NET_WM_STATE_REMOVE, xfc->_NET_WM_STATE_MAXIMIZED_VERT,
+						                   0, 0);
+						xf_SendClientEvent(xfc, window->handle, xfc->_NET_WM_STATE, 4,
+						                   _NET_WM_STATE_REMOVE, xfc->_NET_WM_STATE_MAXIMIZED_HORZ,
+						                   0, 0);
+						xfc->savedMaximizedState = state;
+					}
+
+					XFree(prop);
+				}
+			}
+
+			width = xfc->vscreen.area.right - xfc->vscreen.area.left + 1;
+			height = xfc->vscreen.area.bottom - xfc->vscreen.area.top + 1;
+			DEBUG_X11("X window move and resize %dx%d@%dx%d", startX, startY, width, height);
+			xf_ResizeDesktopWindow(xfc, window, width, height);
+			XMoveWindow(xfc->display, window->handle, startX, startY);
+		}
+		else
+		{
+			xf_SetWindowDecorations(xfc, window->handle, window->decorations);
+			xf_ResizeDesktopWindow(xfc, window, width, height);
+			XMoveWindow(xfc->display, window->handle, startX, startY);
+
+			if (xfc->fullscreenMonitors.top)
+			{
+				xf_SendClientEvent(xfc, window->handle, xfc->_NET_WM_STATE, 4,
+				                   _NET_WM_STATE_REMOVE,
+				                   xfc->fullscreenMonitors.top, 0, 0);
+			}
+
+			/* restore maximized state, if the window was maximized before setting fullscreen */
+			if (xfc->savedMaximizedState & 0x01)
+			{
+				xf_SendClientEvent(xfc, window->handle, xfc->_NET_WM_STATE, 4,
+				                   _NET_WM_STATE_ADD, xfc->_NET_WM_STATE_MAXIMIZED_VERT,
+				                   0, 0);
+			}
+
+			if (xfc->savedMaximizedState & 0x02)
+			{
+				xf_SendClientEvent(xfc, window->handle, xfc->_NET_WM_STATE, 4,
+				                   _NET_WM_STATE_ADD, xfc->_NET_WM_STATE_MAXIMIZED_HORZ,
+				                   0, 0);
+			}
+
+			xfc->savedMaximizedState = 0;
+		}
 	}
 }
 
@@ -229,7 +351,7 @@ BOOL xf_GetWindowProperty(xfContext* xfc, Window window, Atom property,
 		return FALSE;
 
 	status = XGetWindowProperty(xfc->display, window,
-	                            property, 0, length, FALSE, AnyPropertyType,
+	                            property, 0, length, False, AnyPropertyType,
 	                            &actual_type, &actual_format, nitems, bytes, prop);
 
 	if (status != Success)
@@ -279,7 +401,7 @@ BOOL xf_GetWorkArea(xfContext* xfc)
 	if (!status)
 		return FALSE;
 
-	if ((xfc->current_desktop * 4 + 3) >= nitems)
+	if ((xfc->current_desktop * 4 + 3) >= (INT64)nitems)
 	{
 		free(prop);
 		return FALSE;
@@ -328,7 +450,7 @@ static void xf_SetWindowPID(xfContext* xfc, Window window, pid_t pid)
 	                32, PropModeReplace, (BYTE*) &pid, 1);
 }
 
-static const char* get_shm_id()
+static const char* get_shm_id(void)
 {
 	static char shm_id[64];
 	sprintf_s(shm_id, sizeof(shm_id), "/com.freerdp.xfreerdp.tsmf_%016X",
@@ -336,13 +458,13 @@ static const char* get_shm_id()
 	return shm_id;
 }
 
-Window xf_CreateDummyWindow(xfContext *xfc)
+Window xf_CreateDummyWindow(xfContext* xfc)
 {
 	return XCreateSimpleWindow(xfc->display, DefaultRootWindow(xfc->display),
-			0, 0, 1, 1, 0, 0, 0);
+	                           0, 0, 1, 1, 0, 0, 0);
 }
 
-void xf_DestroyDummyWindow(xfContext *xfc, Window window)
+void xf_DestroyDummyWindow(xfContext* xfc, Window window)
 {
 	if (window)
 		XDestroyWindow(xfc->display, window);
@@ -434,6 +556,7 @@ xfWindow* xf_CreateDesktopWindow(xfContext* xfc, char* name, int width,
 
 	XSelectInput(xfc->display, window->handle, input_mask);
 	XClearWindow(xfc->display, window->handle);
+	xf_SetWindowTitleText(xfc, window->handle, name);
 	XMapWindow(xfc->display, window->handle);
 	xf_input_init(xfc, window->handle);
 
@@ -456,13 +579,13 @@ xfWindow* xf_CreateDesktopWindow(xfContext* xfc, char* name, int width,
 	{
 		XMoveWindow(xfc->display, window->handle, 0, 0);
 	}
-	else if (settings->DesktopPosX || settings->DesktopPosY)
+	else if (settings->DesktopPosX != UINT32_MAX && settings->DesktopPosY != UINT32_MAX)
 	{
 		XMoveWindow(xfc->display, window->handle, settings->DesktopPosX,
 		            settings->DesktopPosY);
 	}
 
-	XStoreName(xfc->display, window->handle, name);
+	window->floatbar = xf_floatbar_new(xfc, window->handle, name, settings->Floatbar);
 	return window;
 }
 
@@ -470,9 +593,12 @@ void xf_ResizeDesktopWindow(xfContext* xfc, xfWindow* window, int width,
                             int height)
 {
 	XSizeHints* size_hints;
+	rdpSettings* settings = NULL;
 
 	if (!xfc || !window)
 		return;
+
+	settings = xfc->context.settings;
 
 	if (!(size_hints = XAllocSizeHints()))
 		return;
@@ -481,21 +607,22 @@ void xf_ResizeDesktopWindow(xfContext* xfc, xfWindow* window, int width,
 	size_hints->win_gravity = NorthWestGravity;
 	size_hints->min_width = size_hints->min_height = 1;
 	size_hints->max_width = size_hints->max_height = 16384;
-	XSetWMNormalHints(xfc->display, window->handle, size_hints);
 	XResizeWindow(xfc->display, window->handle, width, height);
 #ifdef WITH_XRENDER
 
-	if (!xfc->context.settings->SmartSizing)
+	if (!settings->SmartSizing && !settings->DynamicResolutionUpdate)
 #endif
 	{
 		if (!xfc->fullscreen)
 		{
+			/* min == max is an hint for the WM to indicate that the window should
+			 * not be resizable */
 			size_hints->min_width = size_hints->max_width = width;
 			size_hints->min_height = size_hints->max_height = height;
-			XSetWMNormalHints(xfc->display, window->handle, size_hints);
 		}
 	}
 
+	XSetWMNormalHints(xfc->display, window->handle, size_hints);
 	XFree(size_hints);
 }
 
@@ -506,6 +633,8 @@ void xf_DestroyDesktopWindow(xfContext* xfc, xfWindow* window)
 
 	if (xfc->window == window)
 		xfc->window = NULL;
+
+	xf_floatbar_free(window->floatbar);
 
 	if (window->gc)
 		XFreeGC(xfc->display, window->gc);
@@ -532,25 +661,14 @@ void xf_SetWindowStyle(xfContext* xfc, xfAppWindow* appWindow, UINT32 style,
                        UINT32 ex_style)
 {
 	Atom window_type;
+	BOOL redirect = FALSE;
 
 	if ((ex_style & WS_EX_NOACTIVATE) || (ex_style & WS_EX_TOOLWINDOW))
 	{
-		/*
-		 * Tooltips and menu items should be unmanaged windows
-		 * (called "override redirect" in X windows parlance)
-		 * If they are managed, there are issues with window focus that
-		 * cause the windows to behave improperly.  For example, a mouse
-		 * press will dismiss a drop-down menu because the RDP server
-		 * sees that as a focus out event from the window owning the
-		 * dropdown.
-		 */
-		XSetWindowAttributes attrs;
-		attrs.override_redirect = True;
-		XChangeWindowAttributes(xfc->display, appWindow->handle, CWOverrideRedirect,
-		                        &attrs);
+		redirect = TRUE;
 		appWindow->is_transient = TRUE;
 		xf_SetWindowUnlisted(xfc, appWindow->handle);
-		window_type = xfc->_NET_WM_WINDOW_TYPE_POPUP;
+		window_type = xfc->_NET_WM_WINDOW_TYPE_DROPDOWN_MENU;
 	}
 	/*
 	 * TOPMOST window that is not a tool window is treated like a regular window (i.e. task manager).
@@ -572,37 +690,38 @@ void xf_SetWindowStyle(xfContext* xfc, xfAppWindow* appWindow, UINT32 style,
 		window_type = xfc->_NET_WM_WINDOW_TYPE_NORMAL;
 	}
 
+	{
+		/*
+		 * Tooltips and menu items should be unmanaged windows
+		 * (called "override redirect" in X windows parlance)
+		 * If they are managed, there are issues with window focus that
+		 * cause the windows to behave improperly.  For example, a mouse
+		 * press will dismiss a drop-down menu because the RDP server
+		 * sees that as a focus out event from the window owning the
+		 * dropdown.
+		 */
+		XSetWindowAttributes attrs;
+		attrs.override_redirect = redirect ? True : False;
+		XChangeWindowAttributes(xfc->display, appWindow->handle, CWOverrideRedirect,
+		                        &attrs);
+	}
+
 	XChangeProperty(xfc->display, appWindow->handle, xfc->_NET_WM_WINDOW_TYPE,
 	                XA_ATOM, 32, PropModeReplace, (BYTE*) &window_type, 1);
 }
 
-void xf_SetWindowText(xfContext* xfc, xfAppWindow* appWindow, char* name)
+void xf_SetWindowText(xfContext* xfc, xfAppWindow* appWindow, const char* name)
 {
-	const size_t i = strlen(name);
-	XStoreName(xfc->display, appWindow->handle, name);
-	Atom wm_Name = xfc->_NET_WM_NAME;
-	Atom utf8Str = xfc->UTF8_STRING;
-	XChangeProperty(xfc->display, appWindow->handle, wm_Name, utf8Str, 8,
-	                PropModeReplace, (unsigned char*)name, i);
+	xf_SetWindowTitleText(xfc, appWindow->handle, name);
 }
 
-void xf_FixWindowCoordinates(xfContext* xfc, int* x, int* y, int* width,
-                             int* height)
+static void xf_FixWindowCoordinates(xfContext* xfc, int* x, int* y, int* width,
+                                    int* height)
 {
 	int vscreen_width;
 	int vscreen_height;
 	vscreen_width = xfc->vscreen.area.right - xfc->vscreen.area.left + 1;
 	vscreen_height = xfc->vscreen.area.bottom - xfc->vscreen.area.top + 1;
-
-	if (*width < 1)
-	{
-		*width = 1;
-	}
-
-	if (*height < 1)
-	{
-		*height = 1;
-	}
 
 	if (*x < xfc->vscreen.area.left)
 	{
@@ -625,9 +744,37 @@ void xf_FixWindowCoordinates(xfContext* xfc, int* x, int* y, int* width,
 	{
 		*height = vscreen_height;
 	}
+
+	if (*width < 1)
+	{
+		*width = 1;
+	}
+
+	if (*height < 1)
+	{
+		*height = 1;
+	}
 }
 
 int xf_AppWindowInit(xfContext* xfc, xfAppWindow* appWindow)
+{
+	if (!xfc || !appWindow)
+		return -1;
+
+	xf_SetWindowDecorations(xfc, appWindow->handle, appWindow->decorations);
+	xf_SetWindowStyle(xfc, appWindow, appWindow->dwStyle, appWindow->dwExStyle);
+	xf_SetWindowPID(xfc, appWindow->handle, 0);
+	xf_ShowWindow(xfc, appWindow, WINDOW_SHOW);
+	XClearWindow(xfc->display, appWindow->handle);
+	XMapWindow(xfc->display, appWindow->handle);
+	/* Move doesn't seem to work until window is mapped. */
+	xf_MoveWindow(xfc, appWindow, appWindow->x, appWindow->y, appWindow->width,
+				  appWindow->height);
+	xf_SetWindowText(xfc, appWindow, appWindow->title);
+	return 1;
+}
+
+int xf_AppWindowCreate(xfContext* xfc, xfAppWindow* appWindow)
 {
 	XGCValues gcv;
 	int input_mask;
@@ -665,7 +812,7 @@ int xf_AppWindowInit(xfContext* xfc, xfAppWindow* appWindow)
 		else
 		{
 			class = malloc(sizeof("RAIL:00000000"));
-			sprintf_s(class, sizeof("RAIL:00000000"), "RAIL:%08"PRIX32"", appWindow->windowId);
+			sprintf_s(class, sizeof("RAIL:00000000"), "RAIL:%08"PRIX64"", appWindow->windowId);
 			class_hints->res_class = class;
 		}
 
@@ -691,16 +838,7 @@ int xf_AppWindowInit(xfContext* xfc, xfAppWindow* appWindow)
 	             SubstructureRedirectMask | FocusChangeMask | PropertyChangeMask |
 	             ColormapChangeMask | OwnerGrabButtonMask;
 	XSelectInput(xfc->display, appWindow->handle, input_mask);
-	xf_SetWindowDecorations(xfc, appWindow->handle, appWindow->decorations);
-	xf_SetWindowStyle(xfc, appWindow, appWindow->dwStyle, appWindow->dwExStyle);
-	xf_SetWindowPID(xfc, appWindow->handle, 0);
-	xf_ShowWindow(xfc, appWindow, WINDOW_SHOW);
-	XClearWindow(xfc->display, appWindow->handle);
-	XMapWindow(xfc->display, appWindow->handle);
-	/* Move doesn't seem to work until window is mapped. */
-	xf_MoveWindow(xfc, appWindow, appWindow->x, appWindow->y, appWindow->width,
-	              appWindow->height);
-	xf_SetWindowText(xfc, appWindow, appWindow->title);
+
 	return 1;
 }
 
@@ -856,6 +994,7 @@ void xf_ShowWindow(xfContext* xfc, xfAppWindow* appWindow, BYTE state)
 			if (appWindow->is_transient)
 				xf_SetWindowUnlisted(xfc, appWindow->handle);
 
+			XMapWindow(xfc->display, appWindow->handle);
 			break;
 	}
 
@@ -863,43 +1002,6 @@ void xf_ShowWindow(xfContext* xfc, xfAppWindow* appWindow, BYTE state)
 	appWindow->rail_state = state;
 	XFlush(xfc->display);
 }
-
-#if 0
-void xf_SetWindowIcon(xfContext* xfc, xfAppWindow* appWindow, rdpIcon* icon)
-{
-	int x, y;
-	int pixels;
-	int propsize;
-	long* propdata;
-	long* dstp;
-	UINT32* srcp;
-
-	if (!icon->big)
-		return;
-
-	pixels = icon->entry->width * icon->entry->height;
-	propsize = 2 + pixels;
-	propdata = malloc(propsize * sizeof(long));
-	propdata[0] = icon->entry->width;
-	propdata[1] = icon->entry->height;
-	dstp = &(propdata[2]);
-	srcp = (UINT32*) icon->extra;
-
-	for (y = 0; y < icon->entry->height; y++)
-	{
-		for (x = 0; x < icon->entry->width; x++)
-		{
-			*dstp++ = *srcp++;
-		}
-	}
-
-	XChangeProperty(xfc->display, appWindow->handle, xfc->_NET_WM_ICON, XA_CARDINAL,
-	                32,
-	                PropModeReplace, (BYTE*) propdata, propsize);
-	XFlush(xfc->display);
-	free(propdata);
-}
-#endif
 
 void xf_SetWindowRects(xfContext* xfc, xfAppWindow* appWindow,
                        RECTANGLE_16* rects, int nrects)
@@ -958,7 +1060,10 @@ void xf_UpdateWindowArea(xfContext* xfc, xfAppWindow* appWindow, int x, int y,
 {
 	int ax, ay;
 
-        if (appWindow == NULL)
+	if (appWindow == NULL)
+		return;
+
+	if (appWindow->surfaceId < UINT16_MAX)
 		return;
 
 	ax = x + appWindow->windowOffsetX;
@@ -1023,8 +1128,10 @@ xfAppWindow* xf_AppWindowFromX11Window(xfContext* xfc, Window wnd)
 
 	for (index = 0; index < count; index++)
 	{
-		appWindow = (xfAppWindow*) HashTable_GetItemValue(xfc->railWindows,
-		            (void*) pKeys[index]);
+		appWindow = xf_rail_get_window(xfc, *(UINT64*)pKeys[index]);
+
+		if (!appWindow)
+			return NULL;
 
 		if (appWindow->handle == wnd)
 		{

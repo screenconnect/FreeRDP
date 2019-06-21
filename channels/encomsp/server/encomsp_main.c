@@ -110,7 +110,7 @@ static UINT encomsp_recv_change_participant_control_level_pdu(
 
 	if ((beg + header->Length) > end)
 	{
-		if (Stream_GetRemainingLength(s) < ((beg + header->Length) - end))
+		if (Stream_GetRemainingLength(s) < (size_t)((beg + header->Length) - end))
 		{
 			WLog_ERR(TAG, "Not enough data!");
 			return ERROR_INVALID_DATA;
@@ -174,7 +174,7 @@ static UINT encomsp_server_receive_pdu(EncomspServerContext* context,
 	return error;
 }
 
-static void* encomsp_server_thread(void* arg)
+static DWORD WINAPI encomsp_server_thread(LPVOID arg)
 {
 	wStream* s;
 	DWORD nCount;
@@ -285,8 +285,8 @@ out:
 		setChannelError(context->rdpcontext, error,
 		                "encomsp_server_thread reported an error");
 
-	ExitThread((DWORD)error);
-	return NULL;
+	ExitThread(error);
+	return error;
 }
 
 /**
@@ -309,7 +309,7 @@ static UINT encomsp_server_start(EncomspServerContext* context)
 	}
 
 	if (!(context->priv->Thread = CreateThread(NULL, 0,
-	                              (LPTHREAD_START_ROUTINE) encomsp_server_thread, (void*) context, 0, NULL)))
+								  encomsp_server_thread, (void*) context, 0, NULL)))
 	{
 		WLog_ERR(TAG, "CreateThread failed!");
 		CloseHandle(context->priv->StopEvent);

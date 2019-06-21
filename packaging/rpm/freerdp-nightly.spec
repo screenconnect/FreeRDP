@@ -7,6 +7,15 @@
 
 
 %define   INSTALL_PREFIX /opt/freerdp-nightly/
+
+# do not add provides for libs provided by this package
+# or it could possibly mess with system provided packages
+# which depend on freerdp libs
+%global __provides_exclude_from ^%{INSTALL_PREFIX}.*$
+
+# do not require our own libs
+%global __requires_exclude ^(libfreerdp.*|libwinpr).*$
+
 Name:           freerdp-nightly
 Version:        2.0
 Release:        0
@@ -15,7 +24,7 @@ Summary:        Free implementation of the Remote Desktop Protocol (RDP)
 Url:            http://www.freerdp.com
 Group:          Productivity/Networking/Other
 Source0:        %{name}-%{version}.tar.bz2
-#Source1:        %{name}-rpmlintrc
+Source1:        source_version
 BuildRequires:   gcc-c++
 BuildRequires:  cmake >= 2.8.12
 BuildRequires: libxkbfile-devel
@@ -31,10 +40,12 @@ BuildRequires: libXv-devel
 BuildRequires: libXdamage-devel
 BuildRequires: libXtst-devel
 BuildRequires: cups-devel
+BuildRequires: cairo-devel
 BuildRequires: pcsc-lite-devel
 BuildRequires: uuid-devel
 BuildRequires: libxml2-devel
 BuildRequires: zlib-devel
+BuildRequires: krb5-devel
 
 # (Open)Suse
 %if %{defined suse_version}
@@ -44,7 +55,6 @@ BuildRequires: pkg-config
 BuildRequires: libopenssl-devel
 BuildRequires: alsa-devel
 BuildRequires: libpulse-devel
-BuildRequires: libgsm-devel
 BuildRequires: libusb-1_0-devel
 BuildRequires: libudev-devel
 BuildRequires: dbus-1-glib-devel
@@ -53,24 +63,28 @@ BuildRequires: gstreamer-plugins-base-devel
 BuildRequires: wayland-devel
 BuildRequires: libjpeg-devel
 BuildRequires: libavutil-devel
+BuildRequires: libavcodec-devel
+BuildRequires: libswresample-devel
 %endif
 # fedora 21+
-%if 0%{?fedora} >= 21
+%if 0%{?fedora} >= 21 || 0%{?rhel} >= 7
 BuildRequires: docbook-style-xsl
 BuildRequires: libxslt
 BuildRequires: pkgconfig
 BuildRequires: openssl-devel
 BuildRequires: alsa-lib-devel
 BuildRequires: pulseaudio-libs-devel
-BuildRequires: gsm-devel
 BuildRequires: libusbx-devel
 BuildRequires: systemd-devel
 BuildRequires: dbus-glib-devel
 BuildRequires: gstreamer1-devel
 BuildRequires: gstreamer1-plugins-base-devel
-BuildRequires: libwayland-client-devel
 BuildRequires: libjpeg-turbo-devel
 %endif 
+
+%if 0%{?fedora} >= 21 || 0%{?rhel} >= 8
+BuildRequires: libwayland-client-devel
+%endif
 
 BuildRoot:      %{_tmppath}/%{name}-%{version}-build
 
@@ -89,8 +103,11 @@ based on freerdp and winpr.
 
 %prep
 %setup -q
+cd %{_topdir}/BUILD
+cp %{_topdir}/SOURCES/source_version freerdp-nightly-%{version}/.source_version
 
 %build
+
 %cmake  -DCMAKE_SKIP_RPATH=FALSE \
         -DCMAKE_SKIP_INSTALL_RPATH=FALSE \
         -DWITH_PULSE=ON \
@@ -99,16 +116,25 @@ based on freerdp and winpr.
         -DWITH_CUPS=ON \
         -DWITH_PCSC=ON \
         -DWITH_JPEG=ON \
-        -DWITH_GSTREAMER_0_10=ON \
-        -DWITH_GSM=ON \
+%if %{defined suse_version}
+        -DWITH_FFMPEG=ON \
+        -DWITH_DSP_FFMPEG=ON \
+%endif
+%if 0%{?fedora} < 21 || 0%{?rhel} < 8
+        -DWITH_WAYLAND=OFF \
+%endif
+        -DWITH_GSSAPI=ON \
         -DCHANNEL_URBDRC=ON \
         -DCHANNEL_URBDRC_CLIENT=ON \
         -DWITH_SERVER=ON \
+        -DWITH_CAIRO=ON \
         -DBUILD_TESTING=OFF \
-        -DCMAKE_BUILD_TYPE=RELWITHDEBINFO \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_INSTALL_PREFIX=%{INSTALL_PREFIX} \
 %if %{defined suse_version}
-	-DCMAKE_NO_BUILTIN_CHRPATH=ON \
+        -DCMAKE_NO_BUILTIN_CHRPATH=ON \
+%else
+        -DWITH_SANITIZE_ADDRESS=ON \
 %endif
         -DCMAKE_INSTALL_LIBDIR=%{_lib}
 
@@ -119,7 +145,7 @@ make %{?_smp_mflags}
 %cmake_install
 %endif
 
-%if %{defined fedora}
+%if %{defined fedora} || %{defined rhel}
 rm -rf $RPM_BUILD_ROOT
 make install DESTDIR=$RPM_BUILD_ROOT
 %endif 
@@ -158,7 +184,7 @@ export NO_BRP_CHECK_RPATH true
 
 
 %changelog
-* Tue Nov 16 2015 FreeRDP Team <team@freerdp.com> - 2.0.0-0
+* Wed Feb 7 2018 FreeRDP Team <team@freerdp.com> - 2.0.0-0
 - Update version information and support for OpenSuse 42.1
 * Tue Feb 03 2015 FreeRDP Team <team@freerdp.com> - 1.2.1-0
 - Update version information

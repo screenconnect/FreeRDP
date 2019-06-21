@@ -44,13 +44,7 @@ void mac_set_view_size(rdpContext* context, MRDPView* view);
 	mfc = (mfContext*) context;
 	mfc->view = (void*) mrdpView;
 
-	if (status < 0)
-	{
-		NSString* winTitle;
-		winTitle = [[NSString alloc] initWithCString:"ERROR"];
-		[window setTitle:winTitle];
-	}
-	else
+	if (status == 0)
 	{
 		NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
 		NSRect screenFrame = [screen frame];
@@ -86,6 +80,16 @@ void mac_set_view_size(rdpContext* context, MRDPView* view);
 
 		[window setTitle:winTitle];
 	}
+}
+
+- (void) applicationWillBecomeActive:(NSNotification*)notification
+{
+	[mrdpView resume];
+}
+
+- (void) applicationWillResignActive:(NSNotification*)notification
+{
+	[mrdpView pause];
 }
 
 - (void) applicationWillTerminate:(NSNotification*)notification
@@ -124,7 +128,7 @@ void mac_set_view_size(rdpContext* context, MRDPView* view);
 
 		length = (int)([str length] + 1);
 		cptr = (char*) malloc(length);
-		strcpy(cptr, [str UTF8String]);
+		sprintf_s(cptr, length, "%s", [str UTF8String]);
 		context->argv[i++] = cptr;
 	}
 
@@ -290,6 +294,8 @@ void mac_set_view_size(rdpContext* context, MRDPView* view)
 	[[view window] setContentMaxSize:innerRect.size];
 	// set window to given area
 	[[view window] setFrame:outerRect display:YES];
+	// set window to front
+	[NSApp activateIgnoringOtherApps:YES];
 
 	if (context->settings->Fullscreen)
 		[[view window] toggleFullScreen:nil];

@@ -31,15 +31,21 @@ macro(generate_protocol_file PROTO)
         COMMAND ${WAYLAND_SCANNER} client-header < ${CMAKE_SOURCE_DIR}/uwac/protocols/${PROTO}.xml > ${CMAKE_CURRENT_BINARY_DIR}/${PROTO}-client-protocol.h
         DEPENDS ${CMAKE_SOURCE_DIR}/uwac/protocols/${PROTO}.xml
     )
-    
+
     list(APPEND GENERATED_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/${PROTO}-client-protocol.h)
     list(APPEND GENERATED_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/${PROTO}-protocol.c)
 endmacro()
 
 generate_protocol_file(xdg-shell)
+generate_protocol_file(xdg-decoration-unstable-v1)
+generate_protocol_file(server-decoration)
 generate_protocol_file(ivi-application)
-generate_protocol_file(fullscreen-shell)
+generate_protocol_file(fullscreen-shell-unstable-v1)
+generate_protocol_file(keyboard-shortcuts-inhibit-unstable-v1)
 
+if(FREEBSD)
+	include_directories(${EPOLLSHIM_INCLUDE_DIR})
+endif()
 include_directories(${WAYLAND_INCLUDE_DIR})
 include_directories(${XKBCOMMON_INCLUDE_DIR})
 include_directories("${CMAKE_SOURCE_DIR}/uwac/include")
@@ -52,13 +58,14 @@ set(${MODULE_PREFIX}_SRCS
     ${GENERATED_SOURCES}
     uwac-display.c
     uwac-input.c
+    uwac-clipboard.c
     uwac-os.c
     uwac-os.h
     uwac-output.c
     uwac-priv.h
     uwac-tools.c
     uwac-utils.c
-	uwac-window.c)
+    uwac-window.c)
 
 
 add_library(${MODULE_NAME} ${${MODULE_PREFIX}_SRCS})
@@ -69,7 +76,7 @@ if (WITH_LIBRARY_VERSIONING)
 	set_target_properties(${MODULE_NAME} PROPERTIES VERSION ${UWAC_VERSION} SOVERSION ${UWAC_API_VERSION})
 endif()
 
-target_link_libraries(${MODULE_NAME} ${${MODULE_PREFIX}_LIBS} ${PRIVATE_KEYWORD} ${WAYLAND_LIBS} ${XKBCOMMON_LIBS} freerdp)
+target_link_libraries(${MODULE_NAME} ${${MODULE_PREFIX}_LIBS} ${PRIVATE_KEYWORD} ${WAYLAND_LIBS} ${XKBCOMMON_LIBS} ${EPOLLSHIM_LIBS} freerdp)
 
 install(TARGETS ${MODULE_NAME} DESTINATION ${CMAKE_INSTALL_LIBDIR} EXPORT uwac)
 

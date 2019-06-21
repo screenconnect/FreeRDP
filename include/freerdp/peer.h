@@ -52,8 +52,10 @@ typedef BOOL (*psPeerLogon)(freerdp_peer* peer, SEC_WINNT_AUTH_IDENTITY* identit
 typedef BOOL (*psPeerAdjustMonitorsLayout)(freerdp_peer* peer);
 typedef BOOL (*psPeerClientCapabilities)(freerdp_peer* peer);
 
-typedef int (*psPeerSendChannelData)(freerdp_peer* peer, UINT16 channelId, BYTE* data, int size);
-typedef int (*psPeerReceiveChannelData)(freerdp_peer* peer, UINT16 channelId, BYTE* data, int size,
+typedef int (*psPeerSendChannelData)(freerdp_peer* peer, UINT16 channelId, const BYTE* data,
+                                     int size);
+typedef int (*psPeerReceiveChannelData)(freerdp_peer* peer, UINT16 channelId, const BYTE* data,
+                                        int size,
                                         int flags, int totalSize);
 
 typedef HANDLE(*psPeerVirtualChannelOpen)(freerdp_peer* peer, const char* name, UINT32 flags);
@@ -64,6 +66,17 @@ typedef int (*psPeerVirtualChannelWrite)(freerdp_peer* peer, HANDLE hChannel, BY
         UINT32 length);
 typedef void* (*psPeerVirtualChannelGetData)(freerdp_peer* peer, HANDLE hChannel);
 typedef int (*psPeerVirtualChannelSetData)(freerdp_peer* peer, HANDLE hChannel, void* data);
+
+/** @brief the result of the license callback */
+typedef enum
+{
+	LICENSE_CB_INTERNAL_ERROR, 	/** an internal error happened in the callback */
+	LICENSE_CB_ABORT,			/** licensing process failed, abort the connection */
+	LICENSE_CB_IN_PROGRESS,		/** incoming packet has been treated, we're waiting for further packets to complete the workflow */
+	LICENSE_CB_COMPLETED		/** the licensing workflow has completed, go to next step */
+} LicenseCallbackResult;
+
+typedef LicenseCallbackResult (*psPeerLicenseCallback)(freerdp_peer* peer, wStream* s);
 
 
 struct rdp_freerdp_peer
@@ -121,6 +134,7 @@ struct rdp_freerdp_peer
 	psPeerAdjustMonitorsLayout AdjustMonitorsLayout;
 	psPeerClientCapabilities ClientCapabilities;
 	psPeerComputeNtlmHash ComputeNtlmHash;
+	psPeerLicenseCallback LicenseCallback;
 };
 
 #ifdef __cplusplus

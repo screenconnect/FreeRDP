@@ -19,8 +19,8 @@
  * limitations under the License.
  */
 
-#ifndef FREERDP_CHANNEL_RDPGFX_CLIENT_COMMON_H
-#define FREERDP_CHANNEL_RDPGFX_CLIENT_COMMON_H
+#ifndef FREERDP_CHANNEL_RDPGFX_COMMON_H
+#define FREERDP_CHANNEL_RDPGFX_COMMON_H
 
 #include <winpr/crt.h>
 #include <winpr/stream.h>
@@ -32,16 +32,22 @@ FREERDP_LOCAL const char* rdpgfx_get_cmd_id_string(UINT16 cmdId);
 FREERDP_LOCAL const char* rdpgfx_get_codec_id_string(UINT16 codecId);
 
 FREERDP_LOCAL UINT rdpgfx_read_header(wStream* s, RDPGFX_HEADER* header);
-FREERDP_LOCAL UINT rdpgfx_write_header(wStream* s, RDPGFX_HEADER* header);
+FREERDP_LOCAL UINT rdpgfx_write_header(wStream* s, const RDPGFX_HEADER* header);
 
 FREERDP_LOCAL UINT rdpgfx_read_point16(wStream* s, RDPGFX_POINT16* pt16);
-FREERDP_LOCAL UINT rdpgfx_write_point16(wStream* s, RDPGFX_POINT16* point16);
+FREERDP_LOCAL UINT rdpgfx_write_point16(wStream* s, const RDPGFX_POINT16* point16);
 
 FREERDP_LOCAL UINT rdpgfx_read_rect16(wStream* s, RECTANGLE_16* rect16);
-FREERDP_LOCAL UINT rdpgfx_write_rect16(wStream* s, RECTANGLE_16* rect16);
+FREERDP_LOCAL UINT rdpgfx_write_rect16(wStream* s, const RECTANGLE_16* rect16);
 
 FREERDP_LOCAL UINT rdpgfx_read_color32(wStream* s, RDPGFX_COLOR32* color32);
-FREERDP_LOCAL UINT rdpgfx_write_color32(wStream* s, RDPGFX_COLOR32* color32);
+FREERDP_LOCAL UINT rdpgfx_write_color32(wStream* s, const RDPGFX_COLOR32* color32);
 
-#endif /* FREERDP_CHANNEL_RDPGFX_CLIENT_COMMON_H */
+#ifdef WITH_DEBUG_RDPGFX
+#define DEBUG_RDPGFX(_LOGGER,...) WLog_Print(_LOGGER, WLOG_DEBUG, __VA_ARGS__)
+#else
+#define DEBUG_RDPGFX(_LOGGER,...) do { } while (0)
+#endif
+
+#endif /* FREERDP_CHANNEL_RDPGFX_COMMON_H */
 

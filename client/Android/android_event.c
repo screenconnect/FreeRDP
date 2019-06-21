@@ -195,7 +195,7 @@ static void android_event_key_free(ANDROID_EVENT_KEY* event)
 	free(event);
 }
 
-ANDROID_EVENT_KEY* android_event_unicodekey_new(UINT16 key)
+ANDROID_EVENT_KEY* android_event_unicodekey_new(UINT16 flags, UINT16 key)
 {
 	ANDROID_EVENT_KEY* event;
 	event = (ANDROID_EVENT_KEY*) calloc(1, sizeof(ANDROID_EVENT_KEY));
@@ -204,6 +204,7 @@ ANDROID_EVENT_KEY* android_event_unicodekey_new(UINT16 key)
 		return NULL;
 
 	event->type = EVENT_TYPE_KEY_UNICODE;
+	event->flags = flags;
 	event->scancode = key;
 	return event;
 }
@@ -309,7 +310,7 @@ BOOL android_event_queue_init(freerdp* inst)
 		return FALSE;
 	}
 
-	queue->events = (ANDROID_EVENT**) calloc(sizeof(ANDROID_EVENT*), queue->size);
+	queue->events = (ANDROID_EVENT**) calloc(queue->size, sizeof(ANDROID_EVENT*));
 
 	if (!queue->events)
 	{

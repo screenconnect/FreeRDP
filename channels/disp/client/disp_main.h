@@ -33,8 +33,6 @@
 
 #include <freerdp/client/disp.h>
 
-#define DISPLAY_CONTROL_PDU_TYPE_CAPS			0x00000005
-#define DISPLAY_CONTROL_PDU_TYPE_MONITOR_LAYOUT		0x00000002
 
 #define TAG CHANNELS_TAG("disp.client")
 

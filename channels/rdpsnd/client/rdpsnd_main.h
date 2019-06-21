@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef __RDPSND_MAIN_H
-#define __RDPSND_MAIN_H
+#ifndef FREERDP_CHANNEL_RDPSND_CLIENT_MAIN_H
+#define FREERDP_CHANNEL_RDPSND_CLIENT_MAIN_H
 
 #include <freerdp/api.h>
 #include <freerdp/svc.h>
@@ -35,6 +35,4 @@
 #define DEBUG_SND(...) do { } while (0)
 #endif
 
-UINT rdpsnd_virtual_channel_write(rdpsndPlugin* rdpsnd, wStream* s);
-
-#endif /* __RDPSND_MAIN_H */
+#endif /* FREERDP_CHANNEL_RDPSND_CLIENT_MAIN_H */

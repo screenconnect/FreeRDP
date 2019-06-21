@@ -66,7 +66,7 @@ static const char client_dll[] = "C:\\Windows\\System32\\mstscax.dll";
 #define GLYPH_CACHE_KEY CLIENT_KEY "\\GlyphCache"
 #define POINTER_CACHE_KEY CLIENT_KEY "\\PointerCache"
 
-void settings_client_load_hkey_local_machine(rdpSettings* settings)
+static void settings_client_load_hkey_local_machine(rdpSettings* settings)
 {
 	HKEY hKey;
 	LONG status;
@@ -218,7 +218,7 @@ void settings_client_load_hkey_local_machine(rdpSettings* settings)
 	}
 }
 
-void settings_server_load_hkey_local_machine(rdpSettings* settings)
+static void settings_server_load_hkey_local_machine(rdpSettings* settings)
 {
 	HKEY hKey;
 	LONG status;
@@ -242,7 +242,7 @@ void settings_server_load_hkey_local_machine(rdpSettings* settings)
 	RegCloseKey(hKey);
 }
 
-void settings_load_hkey_local_machine(rdpSettings* settings)
+static void settings_load_hkey_local_machine(rdpSettings* settings)
 {
 	if (settings->ServerMode)
 		settings_server_load_hkey_local_machine(settings);
@@ -250,13 +250,12 @@ void settings_load_hkey_local_machine(rdpSettings* settings)
 		settings_client_load_hkey_local_machine(settings);
 }
 
-BOOL settings_get_computer_name(rdpSettings* settings)
+static BOOL settings_get_computer_name(rdpSettings* settings)
 {
 	DWORD nSize = 0;
 	CHAR* computerName;
 
-	if (GetComputerNameExA(ComputerNameNetBIOS, NULL, &nSize) || (GetLastError() != ERROR_MORE_DATA) ||
-	    (nSize < 2))
+	if (GetComputerNameExA(ComputerNameNetBIOS, NULL, &nSize) || GetLastError() != ERROR_MORE_DATA)
 		return FALSE;
 
 	computerName = calloc(nSize, sizeof(CHAR));
@@ -281,6 +280,39 @@ BOOL settings_get_computer_name(rdpSettings* settings)
 	return TRUE;
 }
 
+BOOL freerdp_settings_set_default_order_support(rdpSettings* settings)
+{
+	if (!settings)
+		return FALSE;
+
+	ZeroMemory(settings->OrderSupport, 32);
+	settings->OrderSupport[NEG_DSTBLT_INDEX] = TRUE;
+	settings->OrderSupport[NEG_PATBLT_INDEX] = TRUE;
+	settings->OrderSupport[NEG_SCRBLT_INDEX] = TRUE;
+	settings->OrderSupport[NEG_OPAQUE_RECT_INDEX] = TRUE;
+	settings->OrderSupport[NEG_DRAWNINEGRID_INDEX] = FALSE;
+	settings->OrderSupport[NEG_MULTIDSTBLT_INDEX] = FALSE;
+	settings->OrderSupport[NEG_MULTIPATBLT_INDEX] = FALSE;
+	settings->OrderSupport[NEG_MULTISCRBLT_INDEX] = FALSE;
+	settings->OrderSupport[NEG_MULTIOPAQUERECT_INDEX] = TRUE;
+	settings->OrderSupport[NEG_MULTI_DRAWNINEGRID_INDEX] = FALSE;
+	settings->OrderSupport[NEG_LINETO_INDEX] = TRUE;
+	settings->OrderSupport[NEG_POLYLINE_INDEX] = TRUE;
+	settings->OrderSupport[NEG_MEMBLT_INDEX] = settings->BitmapCacheEnabled;
+	settings->OrderSupport[NEG_MEM3BLT_INDEX] = settings->BitmapCacheEnabled;
+	settings->OrderSupport[NEG_MEMBLT_V2_INDEX] = settings->BitmapCacheEnabled;
+	settings->OrderSupport[NEG_MEM3BLT_V2_INDEX] = settings->BitmapCacheEnabled;
+	settings->OrderSupport[NEG_SAVEBITMAP_INDEX] = FALSE;
+	settings->OrderSupport[NEG_GLYPH_INDEX_INDEX] = settings->GlyphSupportLevel != GLYPH_SUPPORT_NONE;
+	settings->OrderSupport[NEG_FAST_INDEX_INDEX] = settings->GlyphSupportLevel != GLYPH_SUPPORT_NONE;
+	settings->OrderSupport[NEG_FAST_GLYPH_INDEX] = settings->GlyphSupportLevel != GLYPH_SUPPORT_NONE;
+	settings->OrderSupport[NEG_POLYGON_SC_INDEX] = FALSE;
+	settings->OrderSupport[NEG_POLYGON_CB_INDEX] = FALSE;
+	settings->OrderSupport[NEG_ELLIPSE_SC_INDEX] = FALSE;
+	settings->OrderSupport[NEG_ELLIPSE_CB_INDEX] = FALSE;
+	return TRUE;
+}
+
 rdpSettings* freerdp_settings_new(DWORD flags)
 {
 	char* base;
@@ -290,6 +322,16 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	if (!settings)
 		return NULL;
 
+	settings->HiDefRemoteApp = FALSE;
+	settings->RemoteApplicationSupportMask = RAIL_LEVEL_SUPPORTED |
+	        RAIL_LEVEL_DOCKED_LANGBAR_SUPPORTED            |
+	        RAIL_LEVEL_SHELL_INTEGRATION_SUPPORTED         |
+	        RAIL_LEVEL_LANGUAGE_IME_SYNC_SUPPORTED         |
+	        RAIL_LEVEL_SERVER_TO_CLIENT_IME_SYNC_SUPPORTED |
+	        RAIL_LEVEL_HIDE_MINIMIZED_APPS_SUPPORTED       |
+	        RAIL_LEVEL_WINDOW_CLOAKING_SUPPORTED           |
+	        RAIL_LEVEL_HANDSHAKE_EX_SUPPORTED;
+	settings->SupportHeartbeatPdu = TRUE;
 	settings->ServerMode = (flags & FREERDP_SETTINGS_SERVER_MODE) ? TRUE : FALSE;
 	settings->WaitForOutputBufferFlush = TRUE;
 	settings->MaxTimeInCheckLoop = 100;
@@ -299,7 +341,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	settings->Fullscreen = FALSE;
 	settings->GrabKeyboard = TRUE;
 	settings->Decorations = TRUE;
-	settings->RdpVersion = 7;
+	settings->RdpVersion = RDP_VERSION_10_6;
 	settings->ColorDepth = 16;
 	settings->ExtSecurity = FALSE;
 	settings->NlaSecurity = TRUE;
@@ -320,11 +362,12 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	settings->GatewayPort = 443;
 	settings->DesktopResize = TRUE;
 	settings->ToggleFullscreen = TRUE;
-	settings->DesktopPosX = 0;
-	settings->DesktopPosY = 0;
+	settings->DesktopPosX = UINT32_MAX;
+	settings->DesktopPosY = UINT32_MAX;
+	settings->SoftwareGdi = TRUE;
 	settings->UnmapButtons = FALSE;
 	settings->PerformanceFlags = PERF_FLAG_NONE;
-	settings->AllowFontSmoothing = FALSE;
+	settings->AllowFontSmoothing = TRUE;
 	settings->AllowDesktopComposition = FALSE;
 	settings->DisableWallpaper = FALSE;
 	settings->DisableFullWindowDrag = TRUE;
@@ -333,14 +376,11 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	settings->ConnectionType = CONNECTION_TYPE_LAN;
 	settings->EncryptionMethods = ENCRYPTION_METHOD_NONE;
 	settings->EncryptionLevel = ENCRYPTION_LEVEL_NONE;
+	settings->FIPSMode = FALSE;
 	settings->CompressionEnabled = TRUE;
 	settings->LogonNotify = TRUE;
-
-	if (settings->ServerMode)
-		settings->CompressionLevel = PACKET_COMPR_TYPE_RDP61;
-	else
-		settings->CompressionLevel = PACKET_COMPR_TYPE_RDP61;
-
+	settings->BrushSupportLevel = BRUSH_COLOR_FULL;
+	settings->CompressionLevel = PACKET_COMPR_TYPE_RDP61;
 	settings->Authentication = TRUE;
 	settings->AuthenticationOnly = FALSE;
 	settings->CredentialsFromStdin = FALSE;
@@ -378,33 +418,6 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	if (!settings->ReceivedCapabilities)
 		goto out_fail;
 
-	settings->OrderSupport = calloc(1, 32);
-
-	if (!settings->OrderSupport)
-		goto out_fail;
-
-	settings->OrderSupport[NEG_DSTBLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_PATBLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_SCRBLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_OPAQUE_RECT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_DRAWNINEGRID_INDEX] = TRUE;
-	settings->OrderSupport[NEG_MULTIDSTBLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_MULTIPATBLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_MULTISCRBLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_MULTIOPAQUERECT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_MULTI_DRAWNINEGRID_INDEX] = TRUE;
-	settings->OrderSupport[NEG_LINETO_INDEX] = TRUE;
-	settings->OrderSupport[NEG_POLYLINE_INDEX] = TRUE;
-	settings->OrderSupport[NEG_MEMBLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_MEM3BLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_SAVEBITMAP_INDEX] = TRUE;
-	settings->OrderSupport[NEG_GLYPH_INDEX_INDEX] = TRUE;
-	settings->OrderSupport[NEG_FAST_INDEX_INDEX] = TRUE;
-	settings->OrderSupport[NEG_FAST_GLYPH_INDEX] = TRUE;
-	settings->OrderSupport[NEG_POLYGON_SC_INDEX] = TRUE;
-	settings->OrderSupport[NEG_POLYGON_CB_INDEX] = TRUE;
-	settings->OrderSupport[NEG_ELLIPSE_SC_INDEX] = TRUE;
-	settings->OrderSupport[NEG_ELLIPSE_CB_INDEX] = TRUE;
 	settings->ClientProductId = calloc(1, 32);
 
 	if (!settings->ClientProductId)
@@ -427,9 +440,6 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	settings->DrawAllowDynamicColorFidelity = FALSE;
 	settings->FrameMarkerCommandEnabled = TRUE;
 	settings->SurfaceFrameMarkerEnabled = TRUE;
-	settings->BitmapCacheV3Enabled = FALSE;
-	settings->BitmapCacheEnabled = TRUE;
-	settings->BitmapCachePersistEnabled = FALSE;
 	settings->AllowCacheWaitingList = TRUE;
 	settings->BitmapCacheV2NumCells = 5;
 	settings->BitmapCacheV2CellInfo = (BITMAP_CACHE_V2_CELL_INFO*) malloc(sizeof(
@@ -484,7 +494,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	settings->GlyphCache[9].cacheMaximumCellSize = 256;
 	settings->FragCache->cacheEntries = 256;
 	settings->FragCache->cacheMaximumCellSize = 256;
-	settings->OffscreenSupportLevel = TRUE;
+	settings->OffscreenSupportLevel = FALSE;
 	settings->OffscreenCacheSize = 7680;
 	settings->OffscreenCacheEntries = 2000;
 	settings->DrawNineGridCacheSize = 2560;
@@ -494,6 +504,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 	if (!settings->ClientDir)
 		goto out_fail;
 
+	settings->RemoteWndSupportLevel = WINDOW_LEVEL_SUPPORTED | WINDOW_LEVEL_SUPPORTED_EX;
 	settings->RemoteAppNumIconCaches = 3;
 	settings->RemoteAppNumIconCacheEntries = 12;
 	settings->VirtualChannelChunkSize = CHANNEL_CHUNK_LENGTH;
@@ -562,6 +573,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 
 	if (!settings->ServerMode)
 	{
+		settings->RedirectClipboard = TRUE;
 		/* these values are used only by the client part */
 		settings->HomePath = GetKnownPath(KNOWN_PATH_HOME);
 
@@ -587,7 +599,7 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 		}
 		else
 		{
-			int i;
+			size_t i;
 			char product[sizeof(FREERDP_PRODUCT_STRING)];
 			memset(product, 0, sizeof(product));
 
@@ -610,6 +622,16 @@ rdpSettings* freerdp_settings_new(DWORD flags)
 		goto out_fail;
 
 	settings->ActionScript = _strdup("~/.config/freerdp/action.sh");
+	settings->SmartcardLogon = FALSE;
+	settings->TlsSecLevel = 1;
+	settings->OrderSupport = calloc(1, 32);
+
+	if (!settings->OrderSupport)
+		goto out_fail;
+
+	if (!freerdp_settings_set_default_order_support(settings))
+		goto out_fail;
+
 	return settings;
 out_fail:
 	free(settings->HomePath);
@@ -652,6 +674,7 @@ rdpSettings* freerdp_settings_clone(rdpSettings* settings)
 		CHECKED_STRDUP(Password); /* 22 */
 		CHECKED_STRDUP(Domain); /* 23 */
 		CHECKED_STRDUP(PasswordHash); /* 24 */
+		CHECKED_STRDUP(AcceptedCert); /* 27 */
 		_settings->ClientHostname = NULL; /* 134 */
 		_settings->ClientProductId = NULL; /* 135 */
 		CHECKED_STRDUP(AlternateShell); /* 640 */
@@ -667,6 +690,7 @@ rdpSettings* freerdp_settings_clone(rdpSettings* settings)
 		CHECKED_STRDUP(AllowedTlsCiphers); /* 1101 */
 		CHECKED_STRDUP(NtlmSamFile); /* 1103 */
 		CHECKED_STRDUP(PreconnectionBlob); /* 1155 */
+		CHECKED_STRDUP(RedirectionAcceptedCert); /* 1231 */
 		CHECKED_STRDUP(KerberosKdc); /* 1344 */
 		CHECKED_STRDUP(KerberosRealm); /* 1345 */
 		CHECKED_STRDUP(CertificateName); /* 1409 */
@@ -690,6 +714,8 @@ rdpSettings* freerdp_settings_clone(rdpSettings* settings)
 		CHECKED_STRDUP(GatewayUsername); /* 1987 */
 		CHECKED_STRDUP(GatewayPassword); /* 1988 */
 		CHECKED_STRDUP(GatewayDomain); /* 1989 */
+		CHECKED_STRDUP(GatewayAccessToken); /* 1997 */
+		CHECKED_STRDUP(GatewayAcceptedCert); /* 1998 */
 		CHECKED_STRDUP(ProxyHostname); /* 2016 */
 		CHECKED_STRDUP(RemoteApplicationName); /* 2113 */
 		CHECKED_STRDUP(RemoteApplicationIcon); /* 2114 */
@@ -769,8 +795,8 @@ rdpSettings* freerdp_settings_clone(rdpSettings* settings)
 
 		if (_settings->ChannelDefArraySize > 0)
 		{
-			_settings->ChannelDefArray = (CHANNEL_DEF*) malloc(sizeof(
-			                                 CHANNEL_DEF) * settings->ChannelDefArraySize);
+			_settings->ChannelDefArray = (CHANNEL_DEF*) calloc(settings->ChannelDefArraySize,
+			                             sizeof(CHANNEL_DEF));
 
 			if (!_settings->ChannelDefArray)
 				goto out_fail;
@@ -786,8 +812,8 @@ rdpSettings* freerdp_settings_clone(rdpSettings* settings)
 
 		if (_settings->MonitorDefArraySize > 0)
 		{
-			_settings->MonitorDefArray = (rdpMonitor*) malloc(sizeof(
-			                                 rdpMonitor) * settings->MonitorDefArraySize);
+			_settings->MonitorDefArray = (rdpMonitor*) calloc(settings->MonitorDefArraySize,
+			                             sizeof(rdpMonitor));
 
 			if (!_settings->MonitorDefArray)
 				goto out_fail;
@@ -1030,6 +1056,7 @@ void freerdp_settings_free(rdpSettings* settings)
 	free(settings->Password);
 	free(settings->Domain);
 	free(settings->PasswordHash);
+	free(settings->AcceptedCert);
 	free(settings->AlternateShell);
 	free(settings->ShellWorkingDirectory);
 	free(settings->ComputerName);
@@ -1074,6 +1101,7 @@ void freerdp_settings_free(rdpSettings* settings)
 	free(settings->RedirectionDomain);
 	free(settings->RedirectionPassword);
 	free(settings->RedirectionTsvUrl);
+	free(settings->RedirectionAcceptedCert);
 	free(settings->RemoteAssistanceSessionId);
 	free(settings->RemoteAssistancePassword);
 	free(settings->RemoteAssistancePassStub);
@@ -1083,6 +1111,8 @@ void freerdp_settings_free(rdpSettings* settings)
 	free(settings->GatewayUsername);
 	free(settings->GatewayPassword);
 	free(settings->GatewayDomain);
+	free(settings->GatewayAccessToken);
+	free(settings->GatewayAcceptedCert);
 	free(settings->CertificateName);
 	free(settings->DynamicDSTTimeZoneKeyName);
 	free(settings->PreconnectionBlob);

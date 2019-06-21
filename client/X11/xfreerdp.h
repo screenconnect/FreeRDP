@@ -19,8 +19,8 @@
  * limitations under the License.
  */
 
-#ifndef __XFREERDP_H
-#define __XFREERDP_H
+#ifndef FREERDP_CLIENT_X11_FREERDP_H
+#define FREERDP_CLIENT_X11_FREERDP_H
 
 typedef struct xf_context xfContext;
 
@@ -81,14 +81,18 @@ struct xf_glyph
 typedef struct xf_glyph xfGlyph;
 
 typedef struct xf_clipboard xfClipboard;
-
-/* Value of the first logical button number in X11 which must be */
-/* subtracted to go from a button number in X11 to an index into */
-/* a per-button array.                                           */
-#define BUTTON_BASE Button1
+typedef struct _xfDispContext xfDispContext;
+typedef struct _xfVideoContext xfVideoContext;
+typedef struct xf_rail_icon_cache xfRailIconCache;
 
 /* Number of buttons that are mapped from X11 to RDP button events. */
-#define NUM_BUTTONS_MAPPED 3
+#define NUM_BUTTONS_MAPPED 11
+
+typedef struct
+{
+	int button;
+	UINT16 flags;
+} button_map;
 
 struct xf_context
 {
@@ -140,13 +144,6 @@ struct xf_context
 	UINT16 frame_x2;
 	UINT16 frame_y2;
 
-	UINT8 red_shift_l;
-	UINT8 red_shift_r;
-	UINT8 green_shift_l;
-	UINT8 green_shift_r;
-	UINT8 blue_shift_l;
-	UINT8 blue_shift_r;
-
 	int XInputOpcode;
 
 	int savedWidth;
@@ -164,7 +161,6 @@ struct xf_context
 	BOOL focused;
 	BOOL use_xinput;
 	BOOL mouse_active;
-	BOOL suppress_output;
 	BOOL fullscreen_toggle;
 	BOOL controlToggle;
 	UINT32 KeyboardLayout;
@@ -178,9 +174,9 @@ struct xf_context
 	BOOL complex_regions;
 	VIRTUAL_SCREEN vscreen;
 	void* xv_context;
-	TsmfClientContext* tsmf;
-	xfClipboard* clipboard;
-	CliprdrClientContext* cliprdr;
+
+	Atom* supportedAtoms;
+	unsigned long supportedAtomCount;
 
 	Atom UTF8_STRING;
 
@@ -188,6 +184,9 @@ struct xf_context
 	Atom _MOTIF_WM_HINTS;
 	Atom _NET_CURRENT_DESKTOP;
 	Atom _NET_WORKAREA;
+
+	Atom _NET_SUPPORTED;
+	ATOM _NET_SUPPORTING_WM_CHECK;
 
 	Atom _NET_WM_STATE;
 	Atom _NET_WM_STATE_FULLSCREEN;
@@ -206,6 +205,7 @@ struct xf_context
 	Atom _NET_WM_WINDOW_TYPE_DIALOG;
 	Atom _NET_WM_WINDOW_TYPE_UTILITY;
 	Atom _NET_WM_WINDOW_TYPE_POPUP;
+	Atom _NET_WM_WINDOW_TYPE_POPUP_MENU;
 	Atom _NET_WM_WINDOW_TYPE_DROPDOWN_MENU;
 
 	Atom _NET_WM_MOVERESIZE;
@@ -216,18 +216,24 @@ struct xf_context
 	Atom WM_DELETE_WINDOW;
 
 	/* Channels */
+	TsmfClientContext* tsmf;
+	xfClipboard* clipboard;
+	CliprdrClientContext* cliprdr;
+	xfVideoContext* xfVideo;
 	RdpeiClientContext* rdpei;
-	RdpgfxClientContext* gfx;
 	EncomspClientContext* encomsp;
+	xfDispContext* xfDisp;
 
 	RailClientContext* rail;
 	wHashTable* railWindows;
+	xfRailIconCache* railIconCache;
 
 	BOOL xkbAvailable;
 	BOOL xrenderAvailable;
 
 	/* value to be sent over wire for each logical client mouse button */
-	int button_map[NUM_BUTTONS_MAPPED];
+	button_map button_map[NUM_BUTTONS_MAPPED];
+	BYTE savedMaximizedState;
 };
 
 BOOL xf_create_window(xfContext* xfc);
@@ -275,6 +281,7 @@ enum XF_EXIT_CODE
 	XF_EXIT_PROTOCOL = 130,
 	XF_EXIT_CONN_FAILED = 131,
 	XF_EXIT_AUTH_FAILURE = 132,
+	XF_EXIT_NEGO_FAILURE = 133,
 
 	XF_EXIT_UNKNOWN = 255,
 };
@@ -287,5 +294,5 @@ void xf_draw_screen(xfContext* xfc, int x, int y, int w, int h);
 
 FREERDP_API DWORD xf_exit_code_from_disconnect_reason(DWORD reason);
 
-#endif /* __XFREERDP_H */
+#endif /* FREERDP_CLIENT_X11_FREERDP_H */
 

@@ -41,7 +41,7 @@
 #endif
 
 #if defined(WIN32)
-#include <Shlobj.h>
+#include <shlobj.h>
 #else
 #include <errno.h>
 #include <dirent.h>
@@ -116,9 +116,10 @@ static char* GetPath_TEMP(void)
 static char* GetPath_XDG_DATA_HOME(void)
 {
 	char* path = NULL;
-#if defined(WIN32)
+#if defined(WIN32) || defined(__IOS__)
 	path = GetPath_XDG_CONFIG_HOME();
 #else
+	size_t size;
 	char* home = NULL;
 	/**
 	 * There is a single base directory relative to which user-specific data files should be written.
@@ -137,7 +138,8 @@ static char* GetPath_XDG_DATA_HOME(void)
 	if (!home)
 		return NULL;
 
-	path = (char*) malloc(strlen(home) + strlen("/.local/share") + 1);
+	size = strlen(home) + strlen("/.local/share") + 1;
+	path = (char*) malloc(size);
 
 	if (!path)
 	{
@@ -145,7 +147,7 @@ static char* GetPath_XDG_DATA_HOME(void)
 		return NULL;
 	}
 
-	sprintf(path, "%s%s", home, "/.local/share");
+	sprintf_s(path, size, "%s%s", home, "/.local/share");
 	free(home);
 #endif
 	return path;
@@ -167,8 +169,9 @@ static char* GetPath_XDG_CONFIG_HOME(void)
 	}
 
 #elif defined(__IOS__)
-	path = GetCombinedPath(GetPath_HOME(), ".freerdp");
+	path = ios_get_data();
 #else
+	size_t size;
 	char* home = NULL;
 	/**
 	 * There is a single base directory relative to which user-specific configuration files should be written.
@@ -190,7 +193,8 @@ static char* GetPath_XDG_CONFIG_HOME(void)
 	if (!home)
 		return NULL;
 
-	path = (char*) malloc(strlen(home) + strlen("/.config") + 1);
+	size = strlen(home) + strlen("/.config") + 1;
+	path = (char*) malloc(size);
 
 	if (!path)
 	{
@@ -198,7 +202,7 @@ static char* GetPath_XDG_CONFIG_HOME(void)
 		return NULL;
 	}
 
-	sprintf(path, "%s%s", home, "/.config");
+	sprintf_s(path, size, "%s%s", home, "/.config");
 	free(home);
 #endif
 	return path;
@@ -221,7 +225,10 @@ static char* GetPath_XDG_CACHE_HOME(void)
 	}
 
 	free(home);
+#elif defined(__IOS__)
+	path = ios_get_cache();
 #else
+	size_t size;
 	/**
 	 * There is a single base directory relative to which user-specific non-essential (cached) data should be written.
 	 * This directory is defined by the environment variable $XDG_CACHE_HOME.
@@ -239,7 +246,8 @@ static char* GetPath_XDG_CACHE_HOME(void)
 	if (!home)
 		return NULL;
 
-	path = (char*) malloc(strlen(home) + strlen("/.cache") + 1);
+	size = strlen(home) + strlen("/.cache") + 1;
+	path = (char*) malloc(size);
 
 	if (!path)
 	{
@@ -247,7 +255,7 @@ static char* GetPath_XDG_CACHE_HOME(void)
 		return NULL;
 	}
 
-	sprintf(path, "%s%s", home, "/.cache");
+	sprintf_s(path, size, "%s%s", home, "/.cache");
 	free(home);
 #endif
 	return path;
@@ -467,29 +475,47 @@ BOOL PathMakePathA(LPCSTR path, LPSECURITY_ATTRIBUTES lpAttributes)
 	const char delim = PathGetSeparatorA(PATH_STYLE_NATIVE);
 	char* dup;
 	char* p;
-
+	BOOL result = TRUE;
 	/* we only operate on a non-null, absolute path */
+#if defined(__OS2__)
+
+	if (!path)
+		return FALSE;
+
+#else
+
 	if (!path || *path != delim)
 		return FALSE;
+
+#endif
 
 	if (!(dup = _strdup(path)))
 		return FALSE;
 
+#ifdef __OS2__
+	p = (strlen(dup) > 3) && (dup[1] == ':') && (dup[2] == delim)) ? &dup[3] : dup;
+
+	while (p)
+#else
 	for (p = dup; p;)
-	{
-		if ((p = strchr(p + 1, delim)))
+#endif
+{
+	if ((p = strchr(p + 1, delim)))
 			* p = '\0';
 
 		if (mkdir(dup, 0777) != 0)
 			if (errno != EEXIST)
+			{
+				result = FALSE;
 				break;
+			}
 
 		if (p)
 			*p = delim;
 	}
 
 	free(dup);
-	return (p == NULL);
+	return (result);
 #endif
 }
 
@@ -514,27 +540,28 @@ BOOL PathFileExistsW(LPCWSTR pszPath)
 		return FALSE;
 
 	ret = PathFileExistsA(lpFileNameA);
-	free (lpFileNameA);
-
+	free(lpFileNameA);
 	return ret;
 }
 
 BOOL PathIsDirectoryEmptyA(LPCSTR pszPath)
 {
-	struct dirent *dp;
+	struct dirent* dp;
 	int empty = 1;
+	DIR* dir = opendir(pszPath);
 
-	DIR *dir = opendir(pszPath);
 	if (dir == NULL) /* Not a directory or doesn't exist */
 		return 1;
 
-	while ((dp = readdir(dir)) != NULL) {
+	while ((dp = readdir(dir)) != NULL)
+	{
 		if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0)
 			continue;    /* Skip . and .. */
 
 		empty = 0;
 		break;
 	}
+
 	closedir(dir);
 	return empty;
 }
@@ -549,8 +576,7 @@ BOOL PathIsDirectoryEmptyW(LPCWSTR pszPath)
 		return FALSE;
 
 	ret = PathIsDirectoryEmptyA(lpFileNameA);
-	free (lpFileNameA);
-
+	free(lpFileNameA);
 	return ret;
 }
 

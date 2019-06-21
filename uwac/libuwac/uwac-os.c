@@ -29,17 +29,26 @@
 
 #define _GNU_SOURCE
 
+#if defined(__FreeBSD__) || defined(__DragonFly__)
+#define USE_SHM
+#endif
+
 #include <sys/types.h>
 #include <sys/socket.h>
+#ifdef USE_SHM
+#include <sys/mman.h>
+#endif
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/epoll.h>
 
 #include "../config.h"
 #include "uwac-os.h"
+#include "uwac-utils.h"
 
 static int set_cloexec_or_close(int fd)
 {
@@ -49,6 +58,7 @@ static int set_cloexec_or_close(int fd)
 		return -1;
 
 	flags = fcntl(fd, F_GETFD);
+
 	if (flags == -1)
 		goto err;
 
@@ -56,7 +66,6 @@ static int set_cloexec_or_close(int fd)
 		goto err;
 
 	return fd;
-
 err:
 	close(fd);
 	return -1;
@@ -65,10 +74,11 @@ err:
 int uwac_os_socket_cloexec(int domain, int type, int protocol)
 {
 	int fd;
-
 	fd = socket(domain, type | SOCK_CLOEXEC, protocol);
+
 	if (fd >= 0)
 		return fd;
+
 	if (errno != EINVAL)
 		return -1;
 
@@ -79,10 +89,11 @@ int uwac_os_socket_cloexec(int domain, int type, int protocol)
 int uwac_os_dupfd_cloexec(int fd, long minfd)
 {
 	int newfd;
-
 	newfd = fcntl(fd, F_DUPFD_CLOEXEC, minfd);
+
 	if (newfd >= 0)
 		return newfd;
+
 	if (errno != EINVAL)
 		return -1;
 
@@ -90,15 +101,15 @@ int uwac_os_dupfd_cloexec(int fd, long minfd)
 	return set_cloexec_or_close(newfd);
 }
 
-static ssize_t recvmsg_cloexec_fallback(int sockfd, struct msghdr *msg, int flags)
+static ssize_t recvmsg_cloexec_fallback(int sockfd, struct msghdr* msg, int flags)
 {
 	ssize_t len;
-	struct cmsghdr *cmsg;
-	unsigned char *data;
-	int *fd;
-	int *end;
-
+	struct cmsghdr* cmsg;
+	unsigned char* data;
+	int* fd;
+	int* end;
 	len = recvmsg(sockfd, msg, flags);
+
 	if (len == -1)
 		return -1;
 
@@ -106,27 +117,31 @@ static ssize_t recvmsg_cloexec_fallback(int sockfd, struct msghdr *msg, int flag
 		return len;
 
 	cmsg = CMSG_FIRSTHDR(msg);
-	for (; cmsg != NULL; cmsg = CMSG_NXTHDR(msg, cmsg)) {
+
+	for (; cmsg != NULL; cmsg = CMSG_NXTHDR(msg, cmsg))
+	{
 		if (cmsg->cmsg_level != SOL_SOCKET ||
 		    cmsg->cmsg_type != SCM_RIGHTS)
 			continue;
 
 		data = CMSG_DATA(cmsg);
-		end = (int *)(data + cmsg->cmsg_len - CMSG_LEN(0));
-		for (fd = (int *)data; fd < end; ++fd)
+		end = (int*)(data + cmsg->cmsg_len - CMSG_LEN(0));
+
+		for (fd = (int*)data; fd < end; ++fd)
 			*fd = set_cloexec_or_close(*fd);
 	}
 
 	return len;
 }
 
-ssize_t uwac_os_recvmsg_cloexec(int sockfd, struct msghdr *msg, int flags)
+ssize_t uwac_os_recvmsg_cloexec(int sockfd, struct msghdr* msg, int flags)
 {
 	ssize_t len;
-
 	len = recvmsg(sockfd, msg, flags | MSG_CMSG_CLOEXEC);
+
 	if (len >= 0)
 		return len;
+
 	if (errno != EINVAL)
 		return -1;
 
@@ -136,35 +151,41 @@ ssize_t uwac_os_recvmsg_cloexec(int sockfd, struct msghdr *msg, int flags)
 int uwac_os_epoll_create_cloexec(void)
 {
 	int fd;
-
 #ifdef EPOLL_CLOEXEC
 	fd = epoll_create1(EPOLL_CLOEXEC);
+
 	if (fd >= 0)
 		return fd;
+
 	if (errno != EINVAL)
 		return -1;
-#endif
 
+#endif
 	fd = epoll_create(1);
 	return set_cloexec_or_close(fd);
 }
 
-static int create_tmpfile_cloexec(char *tmpname)
+static int create_tmpfile_cloexec(char* tmpname)
 {
 	int fd;
-
-#ifdef HAVE_MKOSTEMP
+#ifdef USE_SHM
+	fd = shm_open(SHM_ANON, O_CREAT | O_RDWR, 0600);
+#elif defined(HAVE_MKOSTEMP)
 	fd = mkostemp(tmpname, O_CLOEXEC);
+
 	if (fd >= 0)
 		unlink(tmpname);
+
 #else
 	fd = mkstemp(tmpname);
-	if (fd >= 0) {
+
+	if (fd >= 0)
+	{
 		fd = set_cloexec_or_close(fd);
 		unlink(tmpname);
 	}
-#endif
 
+#endif
 	return fd;
 }
 
@@ -192,45 +213,56 @@ static int create_tmpfile_cloexec(char *tmpname)
 int uwac_create_anonymous_file(off_t size)
 {
 	static const char template[] = "/weston-shared-XXXXXX";
-	const char *path;
-	char *name;
+	size_t length;
+	char* name;
+	const char* path;
 	int fd;
 	int ret;
-
 	path = getenv("XDG_RUNTIME_DIR");
-	if (!path) {
+
+	if (!path)
+	{
 		errno = ENOENT;
 		return -1;
 	}
 
-	name = malloc(strlen(path) + sizeof(template));
-	if (!name)
-		return -1;
+	fd = open(path, O_TMPFILE | O_RDWR | O_EXCL, 0600);
 
-	strcpy(name, path);
-	strcat(name, template);
+	if (fd < 0)
+	{
+		length = strlen(path) + sizeof(template);
+		name = xmalloc(length);
 
-	fd = create_tmpfile_cloexec(name);
+		if (!name)
+			return -1;
 
-	free(name);
+		snprintf(name, length, "%s%s", path, template);
+		fd = create_tmpfile_cloexec(name);
+		free(name);
+	}
 
 	if (fd < 0)
 		return -1;
 
 #ifdef HAVE_POSIX_FALLOCATE
 	ret = posix_fallocate(fd, 0, size);
-	if (ret != 0) {
+
+	if (ret != 0)
+	{
 		close(fd);
 		errno = ret;
 		return -1;
 	}
+
 #else
 	ret = ftruncate(fd, size);
-	if (ret < 0) {
+
+	if (ret < 0)
+	{
 		close(fd);
 		return -1;
 	}
-#endif
 
+#endif
 	return fd;
 }

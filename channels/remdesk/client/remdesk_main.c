@@ -109,6 +109,7 @@ static UINT remdesk_generate_expert_blob(remdeskPlugin* remdesk)
 	}
 
 	remdesk->ExpertBlob = freerdp_assistance_construct_expert_blob(name, pass);
+	free(pass);
 
 	if (!remdesk->ExpertBlob)
 	{
@@ -219,7 +220,7 @@ static UINT remdesk_prepare_ctl_header(REMDESK_CTL_HEADER* ctlHeader,
                                        UINT32 msgType, UINT32 msgSize)
 {
 	ctlHeader->msgType = msgType;
-	strcpy(ctlHeader->ChannelName, REMDESK_CHANNEL_CTL_NAME);
+	sprintf_s(ctlHeader->ChannelName, ARRAYSIZE(ctlHeader->ChannelName), REMDESK_CHANNEL_CTL_NAME);
 	ctlHeader->DataLength = 4 + msgSize;
 	return CHANNEL_RC_OK;
 }
@@ -254,7 +255,13 @@ static UINT remdesk_recv_ctl_version_info_pdu(remdeskPlugin* remdesk,
 
 	Stream_Read_UINT32(s, versionMajor); /* versionMajor (4 bytes) */
 	Stream_Read_UINT32(s, versionMinor); /* versionMinor (4 bytes) */
-	remdesk->Version = versionMajor;
+
+	if ((versionMajor != 1) || (versionMinor > 2) || (versionMinor == 0))
+	{
+		WLog_ERR(TAG, "Unsupported protocol version %"PRId32".%"PRId32, versionMajor, versionMinor);
+	}
+
+	remdesk->Version = versionMinor;
 	return CHANNEL_RC_OK;
 }
 
@@ -788,7 +795,6 @@ static VOID VCAPITYPE remdesk_virtual_channel_open_event_ex(LPVOID lpUserParam, 
 			break;
 
 		case CHANNEL_EVENT_WRITE_COMPLETE:
-			Stream_Free((wStream*) pData, TRUE);
 			break;
 
 		case CHANNEL_EVENT_USER:
@@ -804,7 +810,7 @@ static VOID VCAPITYPE remdesk_virtual_channel_open_event_ex(LPVOID lpUserParam, 
 		                "remdesk_virtual_channel_open_event_ex reported an error");
 }
 
-static void* remdesk_virtual_channel_client_thread(void* arg)
+static DWORD WINAPI remdesk_virtual_channel_client_thread(LPVOID arg)
 {
 	wStream* data;
 	wMessage message;
@@ -847,8 +853,8 @@ static void* remdesk_virtual_channel_client_thread(void* arg)
 		setChannelError(remdesk->rdpcontext, error,
 		                "remdesk_virtual_channel_client_thread reported an error");
 
-	ExitThread((DWORD)error);
-	return NULL;
+	ExitThread(error);
+	return error;
 }
 
 /**
@@ -882,7 +888,7 @@ static UINT remdesk_virtual_channel_event_connected(remdeskPlugin* remdesk,
 	}
 
 	remdesk->thread = CreateThread(NULL, 0,
-	                               (LPTHREAD_START_ROUTINE) remdesk_virtual_channel_client_thread, (void*) remdesk,
+	                               remdesk_virtual_channel_client_thread, (void*) remdesk,
 	                               0, NULL);
 
 	if (!remdesk->thread)
@@ -907,6 +913,9 @@ error_out:
 static UINT remdesk_virtual_channel_event_disconnected(remdeskPlugin* remdesk)
 {
 	UINT rc;
+
+	if (remdesk->OpenHandle == 0)
+		return CHANNEL_RC_OK;
 
 	if (MessageQueue_PostQuit(remdesk->queue, 0)
 	    && (WaitForSingleObject(remdesk->thread, INFINITE) == WAIT_FAILED))
@@ -942,6 +951,7 @@ static UINT remdesk_virtual_channel_event_disconnected(remdeskPlugin* remdesk)
 static void remdesk_virtual_channel_event_terminated(remdeskPlugin* remdesk)
 {
 	remdesk->InitHandle = 0;
+	free(remdesk->context);
 	free(remdesk);
 }
 
@@ -1018,7 +1028,7 @@ BOOL VCAPITYPE VirtualChannelEntryEx(PCHANNEL_ENTRY_POINTS pEntryPoints, PVOID p
 	    CHANNEL_OPTION_ENCRYPT_RDP |
 	    CHANNEL_OPTION_COMPRESS_RDP |
 	    CHANNEL_OPTION_SHOW_PROTOCOL;
-	strcpy(remdesk->channelDef.name, "remdesk");
+	sprintf_s(remdesk->channelDef.name, ARRAYSIZE(remdesk->channelDef.name), "remdesk");
 	remdesk->Version = 2;
 	pEntryPointsEx = (CHANNEL_ENTRY_POINTS_FREERDP_EX*) pEntryPoints;
 

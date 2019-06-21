@@ -241,9 +241,12 @@ static Pixmap xf_brush_new(xfContext* xfc, UINT32 width, UINT32 height,
 		                   &xfc->context.gdi->palette, FREERDP_FLIP_NONE);
 		image = XCreateImage(xfc->display, xfc->visual, xfc->depth,
 		                     ZPixmap, 0, (char*) cdata, width, height, xfc->scanline_pad, 0);
+		image->byte_order = LSBFirst;
+		image->bitmap_bit_order = LSBFirst;
 		gc = XCreateGC(xfc->display, xfc->drawable, 0, NULL);
 		XPutImage(xfc->display, bitmap, gc, image, 0, 0, 0, 0, width, height);
-		XFree(image);
+		image->data = NULL;
+		XDestroyImage(image);
 
 		if (cdata != data)
 			_aligned_free(cdata);
@@ -264,8 +267,11 @@ static Pixmap xf_mono_bitmap_new(xfContext* xfc, int width, int height,
 	bitmap = XCreatePixmap(xfc->display, xfc->drawable, width, height, 1);
 	image = XCreateImage(xfc->display, xfc->visual, 1,
 	                     ZPixmap, 0, (char*) data, width, height, 8, scanline);
+	image->byte_order = LSBFirst;
+	image->bitmap_bit_order = LSBFirst;
 	XPutImage(xfc->display, bitmap, xfc->gc_mono, image, 0, 0, 0, 0, width, height);
-	XFree(image);
+	image->data = NULL;
+	XDestroyImage(image);
 	return bitmap;
 }
 
@@ -365,7 +371,12 @@ static BOOL xf_gdi_patblt(rdpContext* context, PATBLT_ORDER* patblt)
 		case GDI_BS_PATTERN:
 			if (brush->bpp > 1)
 			{
-				Pixmap pattern = xf_brush_new(xfc, 8, 8, brush->bpp, brush->data);
+				UINT32 bpp = brush->bpp;
+
+				if ((bpp == 16) && (context->settings->ColorDepth == 15))
+					bpp = 15;
+
+				Pixmap pattern = xf_brush_new(xfc, 8, 8, bpp, brush->data);
 				XSetFillStyle(xfc->display, xfc->gc, FillTiled);
 				XSetTile(xfc->display, xfc->gc, pattern);
 				XSetTSOrigin(xfc->display, xfc->gc, brush->x, brush->y);
@@ -565,7 +576,7 @@ static BOOL xf_gdi_invalidate_poly_region(xfContext* xfc, XPoint* points,
 static BOOL xf_gdi_polyline(rdpContext* context,
                             const POLYLINE_ORDER* polyline)
 {
-	int i;
+	UINT32 i;
 	int npoints;
 	XColor color;
 	XPoint* points;
@@ -580,7 +591,7 @@ static BOOL xf_gdi_polyline(rdpContext* context,
 	XSetFillStyle(xfc->display, xfc->gc, FillSolid);
 	XSetForeground(xfc->display, xfc->gc, color.pixel);
 	npoints = polyline->numDeltaEntries + 1;
-	points = malloc(sizeof(XPoint) * npoints);
+	points = calloc(npoints, sizeof(XPoint));
 
 	if (!points)
 	{
@@ -677,7 +688,12 @@ static BOOL xf_gdi_mem3blt(rdpContext* context, MEM3BLT_ORDER* mem3blt)
 		case GDI_BS_PATTERN:
 			if (brush->bpp > 1)
 			{
-				pattern = xf_brush_new(xfc, 8, 8, brush->bpp, brush->data);
+				UINT32 bpp = brush->bpp;
+
+				if ((bpp == 16) && (context->settings->ColorDepth == 15))
+					bpp = 15;
+
+				pattern = xf_brush_new(xfc, 8, 8, bpp, brush->data);
 				XSetFillStyle(xfc->display, xfc->gc, FillTiled);
 				XSetTile(xfc->display, xfc->gc, pattern);
 				XSetTSOrigin(xfc->display, xfc->gc, brush->x, brush->y);
@@ -731,7 +747,8 @@ fail:
 static BOOL xf_gdi_polygon_sc(rdpContext* context,
                               const POLYGON_SC_ORDER* polygon_sc)
 {
-	int i, npoints;
+	UINT32 i;
+	int npoints;
 	XPoint* points;
 	XColor brush_color;
 	xfContext* xfc = (xfContext*) context;
@@ -743,7 +760,7 @@ static BOOL xf_gdi_polygon_sc(rdpContext* context,
 	xf_lock_x11(xfc, FALSE);
 	xf_set_rop2(xfc, polygon_sc->bRop2);
 	npoints = polygon_sc->numPoints + 1;
-	points = malloc(sizeof(XPoint) * npoints);
+	points = calloc(npoints, sizeof(XPoint));
 
 	if (!points)
 	{
@@ -795,7 +812,8 @@ static BOOL xf_gdi_polygon_sc(rdpContext* context,
 static BOOL xf_gdi_polygon_cb(rdpContext* context,
                               POLYGON_CB_ORDER* polygon_cb)
 {
-	int i, npoints;
+	UINT32 i;
+	int npoints;
 	XPoint* points;
 	Pixmap pattern;
 	const rdpBrush* brush;
@@ -814,7 +832,7 @@ static BOOL xf_gdi_polygon_cb(rdpContext* context,
 	brush = &(polygon_cb->brush);
 	xf_set_rop2(xfc, polygon_cb->bRop2);
 	npoints = polygon_cb->numPoints + 1;
-	points = malloc(sizeof(XPoint) * npoints);
+	points = calloc(npoints, sizeof(XPoint));
 
 	if (!points)
 	{
@@ -850,7 +868,12 @@ static BOOL xf_gdi_polygon_cb(rdpContext* context,
 	{
 		if (brush->bpp > 1)
 		{
-			pattern = xf_brush_new(xfc, 8, 8, brush->bpp, brush->data);
+			UINT32 bpp = brush->bpp;
+
+			if ((bpp == 16) && (context->settings->ColorDepth == 15))
+				bpp = 15;
+
+			pattern = xf_brush_new(xfc, 8, 8, bpp, brush->data);
 			XSetFillStyle(xfc->display, xfc->gc, FillTiled);
 			XSetTile(xfc->display, xfc->gc, pattern);
 		}
@@ -975,12 +998,20 @@ static BOOL xf_gdi_update_screen(xfContext* xfc, const BYTE* pSrcData,
 	XImage* image;
 	UINT32 i, nbRects;
 	const RECTANGLE_16* rects;
+	UINT32 bpp;
 
 	if (!xfc || !pSrcData)
 		return FALSE;
 
 	if (!(rects = region16_rects(pRegion, &nbRects)))
 		return TRUE;
+
+	if (xfc->depth > 16)
+		bpp = 4;
+	else if (xfc->depth > 8)
+		bpp = 2;
+	else
+		bpp = 1;
 
 	XSetFunction(xfc->display, xfc->gc, GXcopy);
 	XSetFillStyle(xfc->display, xfc->gc, FillSolid);
@@ -991,15 +1022,18 @@ static BOOL xf_gdi_update_screen(xfContext* xfc, const BYTE* pSrcData,
 		UINT32 top = rects[i].top;
 		UINT32 width = rects[i].right - rects[i].left;
 		UINT32 height = rects[i].bottom - rects[i].top;
-		const BYTE* src = pSrcData + top * scanline + 4 * left;
-
+		const BYTE* src = pSrcData + top * scanline + bpp * left;
 		image = XCreateImage(xfc->display, xfc->visual, xfc->depth, ZPixmap, 0,
 		                     (char*) src, width, height, xfc->scanline_pad, scanline);
+
 		if (!image)
 			break;
 
+		image->byte_order = LSBFirst;
+		image->bitmap_bit_order = LSBFirst;
 		XPutImage(xfc->display, xfc->primary, xfc->gc, image, 0, 0, left, top, width, height);
-		XFree(image);
+		image->data = NULL;
+		XDestroyImage(image);
 		ret = xf_gdi_surface_update_frame(xfc, left, top, width, height);
 	}
 
@@ -1024,19 +1058,16 @@ static BOOL xf_gdi_surface_bits(rdpContext* context,
 	region16_init(&region);
 	cmdRect.left = cmd->destLeft;
 	cmdRect.top = cmd->destTop;
-	cmdRect.right = cmdRect.left + cmd->width;
-	cmdRect.bottom = cmdRect.top + cmd->height;
-
-
+	cmdRect.right = cmdRect.left + cmd->bmp.width;
+	cmdRect.bottom = cmdRect.top + cmd->bmp.height;
 	gdi = context->gdi;
-
 	xf_lock_x11(xfc, FALSE);
 
-	switch (cmd->codecID)
+	switch (cmd->bmp.codecID)
 	{
 		case RDP_CODEC_ID_REMOTEFX:
-			if (!rfx_process_message(context->codecs->rfx, cmd->bitmapData,
-			                         cmd->bitmapDataLength, cmd->destLeft, cmd->destTop,
+			if (!rfx_process_message(context->codecs->rfx, cmd->bmp.bitmapData,
+			                         cmd->bmp.bitmapDataLength, cmd->destLeft, cmd->destTop,
 			                         gdi->primary_buffer, gdi->dstFormat, gdi->stride,
 			                         gdi->height, &region))
 				goto fail;
@@ -1044,21 +1075,21 @@ static BOOL xf_gdi_surface_bits(rdpContext* context,
 			break;
 
 		case RDP_CODEC_ID_NSCODEC:
-			if (!nsc_process_message(context->codecs->nsc, cmd->bpp, cmd->width,
-			                         cmd->height, cmd->bitmapData, cmd->bitmapDataLength,
+			if (!nsc_process_message(context->codecs->nsc, cmd->bmp.bpp, cmd->bmp.width,
+			                         cmd->bmp.height, cmd->bmp.bitmapData, cmd->bmp.bitmapDataLength,
 			                         gdi->primary_buffer, gdi->dstFormat, gdi->stride,
-			                         0, 0, cmd->width, cmd->height, FREERDP_FLIP_VERTICAL))
+			                         0, 0, cmd->bmp.width, cmd->bmp.height, FREERDP_FLIP_VERTICAL))
 				goto fail;
 
 			region16_union_rect(&region, &region, &cmdRect);
 			break;
 
 		case RDP_CODEC_ID_NONE:
-			pSrcData = cmd->bitmapData;
-			format = gdi_get_pixel_format(cmd->bpp);
+			pSrcData = cmd->bmp.bitmapData;
+			format = gdi_get_pixel_format(cmd->bmp.bpp);
 
 			if (!freerdp_image_copy(gdi->primary_buffer, gdi->dstFormat, gdi->stride,
-			                        0, 0, cmd->width, cmd->height,
+			                        cmd->destLeft, cmd->destTop, cmd->bmp.width, cmd->bmp.height,
 			                        pSrcData, format, 0, 0, 0,
 			                        &xfc->context.gdi->palette, FREERDP_FLIP_VERTICAL))
 				goto fail;
@@ -1067,7 +1098,7 @@ static BOOL xf_gdi_surface_bits(rdpContext* context,
 			break;
 
 		default:
-			WLog_ERR(TAG, "Unsupported codecID %"PRIu32"", cmd->codecID);
+			WLog_ERR(TAG, "Unsupported codecID %"PRIu16"", cmd->bmp.codecID);
 			ret = TRUE;
 			goto fail;
 	}

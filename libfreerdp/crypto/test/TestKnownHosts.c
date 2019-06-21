@@ -19,49 +19,55 @@
 
 #include <winpr/path.h>
 #include <winpr/file.h>
+#include <winpr/sysinfo.h>
+
 #include <freerdp/crypto/certificate.h>
 
 static int prepare(const char* currentFileV2, const char* legacyFileV2, const char* legacyFile)
 {
-	char* legacy[] = {
+	char* legacy[] =
+	{
 		"someurl ff:11:22:dd\r\n",
 		"otherurl aa:bb:cc:dd\r",
 		"legacyurl aa:bb:cc:dd\n"
 	};
-	char* hosts[] = {
-		"someurl 3389 ff:11:22:dd subject issuer\r\n",
-		"otherurl\t3389\taa:bb:cc:dd\tsubject2\tissuer2\r",
+	char* hosts[] =
+	{
+		"#somecomment\r\n"
+		"someurl 3389 ff:11:22:dd subject issuer\r\n"
+		" \t#anothercomment\r\n"
+		"otherurl\t3389\taa:bb:cc:dd\tsubject2\tissuer2\r"
 	};
 	FILE* fl = NULL;
 	FILE* fc = NULL;
 	size_t i;
-
 	fc = fopen(currentFileV2, "w+");
+
 	if (!fc)
 		goto finish;
 
 	fl = fopen(legacyFileV2, "w+");
+
 	if (!fl)
 		goto finish;
 
-	for (i=0; i<sizeof(hosts)/sizeof(hosts[0]); i++)
+	for (i = 0; i < sizeof(hosts) / sizeof(hosts[0]); i++)
 	{
 		if (fwrite(hosts[i], strlen(hosts[i]), 1, fl) != 1 ||
-			fwrite(hosts[i], strlen(hosts[i]), 1, fc) != 1)
+		    fwrite(hosts[i], strlen(hosts[i]), 1, fc) != 1)
 			goto finish;
 	}
 
 	fclose(fc);
 	fc = NULL;
-
 	fclose(fl);
 	fl = NULL;
-
 	fl = fopen(legacyFile, "w+");
+
 	if (!fl)
 		goto finish;
 
-	for (i=0; i<sizeof(legacy)/sizeof(legacy[0]); i++)
+	for (i = 0; i < sizeof(legacy) / sizeof(legacy[0]); i++)
 	{
 		if (fwrite(legacy[i], strlen(legacy[i]), 1, fl) != 1)
 			goto finish;
@@ -69,10 +75,11 @@ static int prepare(const char* currentFileV2, const char* legacyFileV2, const ch
 
 	fclose(fl);
 	return 0;
-
 finish:
+
 	if (fl)
 		fclose(fl);
+
 	if (fc)
 		fclose(fc);
 
@@ -92,9 +99,23 @@ int TestKnownHosts(int argc, char* argv[])
 	char* subject = NULL;
 	char* issuer = NULL;
 	char* fp = NULL;
+	char sname[8192];
+	char dname[8192];
+	SYSTEMTIME systemTime;
+	WINPR_UNUSED(argc);
+	WINPR_UNUSED(argv);
+	GetSystemTime(&systemTime);
+	sprintf_s(sname, sizeof(sname),
+	          "TestKnownHostsCurrent-%04"PRIu16"%02"PRIu16"%02"PRIu16"%02"PRIu16"%02"PRIu16"%02"PRIu16"%04"PRIu16,
+	          systemTime.wYear, systemTime.wMonth, systemTime.wDay, systemTime.wHour, systemTime.wMinute,
+	          systemTime.wSecond, systemTime.wMilliseconds);
+	sprintf_s(dname, sizeof(dname),
+	          "TestKnownHostsLegacy-%04"PRIu16"%02"PRIu16"%02"PRIu16"%02"PRIu16"%02"PRIu16"%02"PRIu16"%04"PRIu16,
+	          systemTime.wYear, systemTime.wMonth, systemTime.wDay, systemTime.wHour, systemTime.wMinute,
+	          systemTime.wSecond, systemTime.wMilliseconds);
 
-	current.ConfigPath = GetKnownSubPath(KNOWN_PATH_TEMP, "TestKnownHostsCurrent");
-	legacy.ConfigPath = GetKnownSubPath(KNOWN_PATH_TEMP, "TestKnownHostsLegacy");
+	current.ConfigPath = GetKnownSubPath(KNOWN_PATH_TEMP, sname);
+	legacy.ConfigPath = GetKnownSubPath(KNOWN_PATH_TEMP, dname);
 
 	if (!PathFileExistsA(current.ConfigPath))
 	{
@@ -115,6 +136,7 @@ int TestKnownHosts(int argc, char* argv[])
 	}
 
 	currentFileV2 = GetCombinedPath(current.ConfigPath, "known_hosts2");
+
 	if (!currentFileV2)
 	{
 		fprintf(stderr, "Could not get file path!\n");
@@ -122,6 +144,7 @@ int TestKnownHosts(int argc, char* argv[])
 	}
 
 	legacyFileV2 = GetCombinedPath(legacy.ConfigPath, "known_hosts2");
+
 	if (!legacyFileV2)
 	{
 		fprintf(stderr, "Could not get file path!\n");
@@ -129,13 +152,15 @@ int TestKnownHosts(int argc, char* argv[])
 	}
 
 	legacyFile = GetCombinedPath(legacy.ConfigPath, "known_hosts");
+
 	if (!legacyFile)
 	{
 		fprintf(stderr, "Could not get file path!\n");
 		goto finish;
 	}
 
- 	store = certificate_store_new(&current);
+	store = certificate_store_new(&current);
+
 	if (!store)
 	{
 		fprintf(stderr, "Could not create certificate store!\n");
@@ -147,6 +172,7 @@ int TestKnownHosts(int argc, char* argv[])
 
 	/* Test if host is found in current file. */
 	data = certificate_data_new("someurl", 3389, "subject", "issuer", "ff:11:22:dd");
+
 	if (!data)
 	{
 		fprintf(stderr, "Could not create certificate data!\n");
@@ -165,6 +191,7 @@ int TestKnownHosts(int argc, char* argv[])
 		fprintf(stderr, "Could not read old fingerprint!\n");
 		goto finish;
 	}
+
 	printf("Got %s, %s '%s'\n", subject, issuer, fp);
 	free(subject);
 	free(issuer);
@@ -173,9 +200,9 @@ int TestKnownHosts(int argc, char* argv[])
 	issuer = NULL;
 	fp = NULL;
 	certificate_data_free(data);
-
 	/* Test if host not found in current file. */
 	data = certificate_data_new("somehost", 1234, "", "", "ff:aa:bb:cc");
+
 	if (!data)
 	{
 		fprintf(stderr, "Could not create certificate data!\n");
@@ -196,9 +223,9 @@ int TestKnownHosts(int argc, char* argv[])
 	}
 
 	certificate_data_free(data);
-
 	/* Test host add current file. */
 	data = certificate_data_new("somehost", 1234, "", "", "ff:aa:bb:cc");
+
 	if (!data)
 	{
 		fprintf(stderr, "Could not create certificate data!\n");
@@ -218,9 +245,9 @@ int TestKnownHosts(int argc, char* argv[])
 	}
 
 	certificate_data_free(data);
-
 	/* Test host replace current file. */
 	data = certificate_data_new("somehost", 1234, "", "", "ff:aa:bb:dd:ee");
+
 	if (!data)
 	{
 		fprintf(stderr, "Could not create certificate data!\n");
@@ -240,9 +267,9 @@ int TestKnownHosts(int argc, char* argv[])
 	}
 
 	certificate_data_free(data);
-
 	/* Test host replace invalid entry in current file. */
 	data = certificate_data_new("somehostXXXX", 1234, "", "", "ff:aa:bb:dd:ee");
+
 	if (!data)
 	{
 		fprintf(stderr, "Could not create certificate data!\n");
@@ -262,11 +289,9 @@ int TestKnownHosts(int argc, char* argv[])
 	}
 
 	certificate_data_free(data);
-
-
 	certificate_store_free(store);
-
 	store = certificate_store_new(&legacy);
+
 	if (!store)
 	{
 		fprintf(stderr, "could not create certificate store!\n");
@@ -275,6 +300,7 @@ int TestKnownHosts(int argc, char* argv[])
 
 	/* test if host found in legacy file. */
 	data = certificate_data_new("legacyurl", 1234, "", "", "aa:bb:cc:dd");
+
 	if (!data)
 	{
 		fprintf(stderr, "Could not create certificate data!\n");
@@ -288,9 +314,9 @@ int TestKnownHosts(int argc, char* argv[])
 	}
 
 	certificate_data_free(data);
-
 	/* test if host not found. */
 	data = certificate_data_new("somehost-not-in-file", 1234, "", "", "ff:aa:bb:cc");
+
 	if (!data)
 	{
 		fprintf(stderr, "Could not create certificate data!\n");
@@ -304,25 +330,26 @@ int TestKnownHosts(int argc, char* argv[])
 	}
 
 	rc = 0;
-
 finish:
+	free(current.ConfigPath);
+	free(legacy.ConfigPath);
+
 	if (store)
 		certificate_store_free(store);
+
 	if (data)
 		certificate_data_free(data);
+
 	DeleteFileA(currentFileV2);
 	//RemoveDirectoryA(current.ConfigPath);
-
 	DeleteFileA(legacyFileV2);
 	DeleteFileA(legacyFile);
 	//RemoveDirectoryA(legacy.ConfigPath);
-
-	free (currentFileV2);
-	free (legacyFileV2);
-	free (legacyFile);
+	free(currentFileV2);
+	free(legacyFileV2);
+	free(legacyFile);
 	free(subject);
 	free(issuer);
 	free(fp);
-
 	return rc;
 }

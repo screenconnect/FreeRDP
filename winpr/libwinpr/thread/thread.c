@@ -77,7 +77,7 @@
 #include <unistd.h>
 #endif
 
-#ifdef HAVE_EVENTFD_H
+#ifdef HAVE_SYS_EVENTFD_H
 #include <sys/eventfd.h>
 #endif
 
@@ -159,7 +159,23 @@ static HANDLE_OPS ops =
 	ThreadIsHandled,
 	ThreadCloseHandle,
 	ThreadGetFd,
-	ThreadCleanupHandle
+	ThreadCleanupHandle,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL
 };
 
 
@@ -215,7 +231,7 @@ static BOOL set_event(WINPR_THREAD* thread)
 {
 	int length;
 	BOOL status = FALSE;
-#ifdef HAVE_EVENTFD_H
+#ifdef HAVE_SYS_EVENTFD_H
 	eventfd_t val = 1;
 
 	do
@@ -247,7 +263,7 @@ static BOOL reset_event(WINPR_THREAD* thread)
 {
 	int length;
 	BOOL status = FALSE;
-#ifdef HAVE_EVENTFD_H
+#ifdef HAVE_SYS_EVENTFD_H
 	eventfd_t value;
 
 	do
@@ -269,10 +285,10 @@ static BOOL reset_event(WINPR_THREAD* thread)
 	return status;
 }
 
-static BOOL thread_compare(void* a, void* b)
+static BOOL thread_compare(const void* a, const void* b)
 {
-	pthread_t* p1 = a;
-	pthread_t* p2 = b;
+	const pthread_t* p1 = a;
+	const pthread_t* p2 = b;
 	BOOL rc = pthread_equal(*p1, *p2);
 	return rc;
 }
@@ -282,11 +298,9 @@ static BOOL thread_compare(void* a, void* b)
  * in thread function. */
 static void* thread_launcher(void* arg)
 {
-	DWORD res = 1;
-	void* rc = NULL;
+	DWORD rc = 0;
 	WINPR_THREAD* thread = (WINPR_THREAD*) arg;
-	typedef void* (*fkt_t)(void*);
-	fkt_t fkt;
+	LPTHREAD_START_ROUTINE fkt;
 
 	if (!thread)
 	{
@@ -294,9 +308,9 @@ static void* thread_launcher(void* arg)
 		goto exit;
 	}
 
-	if (!(fkt = (fkt_t)thread->lpStartAddress))
+	if (!(fkt = thread->lpStartAddress))
 	{
-		WLog_ERR(TAG, "Thread function argument is %p", (void *)fkt);
+		WLog_ERR(TAG, "Thread function argument is %p", (void*)fkt);
 		goto exit;
 	}
 
@@ -323,16 +337,15 @@ exit:
 	if (thread)
 	{
 		if (!thread->exited)
-			thread->dwExitCode = (DWORD)(size_t)rc;
+			thread->dwExitCode = rc;
 
 		set_event(thread);
-		res = thread->dwExitCode;
 
 		if (thread->detached || !thread->started)
 			cleanup_handle(thread);
 	}
 
-	return rc;
+	return NULL;
 }
 
 static BOOL winpr_StartThread(WINPR_THREAD* thread)
@@ -401,7 +414,7 @@ HANDLE CreateThread(LPSECURITY_ATTRIBUTES lpThreadAttributes,
 #endif
 	thread->pipe_fd[0] = -1;
 	thread->pipe_fd[1] = -1;
-#ifdef HAVE_EVENTFD_H
+#ifdef HAVE_SYS_EVENTFD_H
 	thread->pipe_fd[0] = eventfd(0, EFD_NONBLOCK);
 
 	if (thread->pipe_fd[0] < 0)
@@ -722,7 +735,7 @@ BOOL SwitchToThread(VOID)
 	 * Note: on some operating systems sched_yield is a stub returning -1.
 	 * usleep should at least trigger a context switch if any thread is waiting.
 	 */
-	if (!sched_yield())
+	if (sched_yield() != 0)
 		usleep(1);
 
 	return TRUE;

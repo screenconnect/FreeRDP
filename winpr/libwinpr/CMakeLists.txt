@@ -15,15 +15,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if (APPLE)
-	# flat_namespace should be avoided, but is required for -undefined warning. Since WinPR currently has
-	# a lot of undefined symbols in use, use this hack until they're filled out.
-	set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-flat_namespace,-undefined,warning")
-endif()
+include(CheckFunctionExists)
 
 set(WINPR_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(WINPR_SRCS "")
-set(WINPR_LIBS "")
+set(WINPR_LIBS_PRIVATE "")
+set(WINPR_LIBS_PUBLIC "")
 set(WINPR_INCLUDES "")
 set(WINPR_DEFINITIONS "")
 
@@ -59,11 +56,18 @@ macro (winpr_include_directory_add)
     endif()
 endmacro()
 
-macro (winpr_library_add)
+macro (winpr_library_add_private)
     foreach (_lib ${ARGN})
-            list (APPEND WINPR_LIBS "${_lib}")
+            list (APPEND WINPR_LIBS_PRIVATE "${_lib}")
     endforeach()
-     set (WINPR_LIBS ${WINPR_LIBS} PARENT_SCOPE)
+     set (WINPR_LIBS_PRIVATE ${WINPR_LIBS_PRIVATE} PARENT_SCOPE)
+endmacro()
+
+macro (winpr_library_add_public)
+    foreach (_lib ${ARGN})
+            list (APPEND WINPR_LIBS_PUBLIC "${_lib}")
+    endforeach()
+     set (WINPR_LIBS_PUBLIC ${WINPR_LIBS_PUBLIC} PARENT_SCOPE)
 endmacro()
 
 macro (winpr_definition_add)
@@ -73,8 +77,18 @@ macro (winpr_definition_add)
      set (WINPR_DEFINITIONS ${WINPR_DEFINITIONS} PARENT_SCOPE)
 endmacro()
 
+set(CMAKE_REQUIRED_LIBRARIES rt)
+check_function_exists(timer_create TIMER_CREATE)
+check_function_exists(timer_delete TIMER_DELETE)
+check_function_exists(timer_settime TIMER_SETTIME)
+check_function_exists(timer_gettime TIMER_GETTIME)
+if (TIMER_CREATE AND TIMER_DELETE AND TIMER_SETTIME AND TIMER_GETTIME)
+    add_definitions(-DWITH_POSIX_TIMER)
+	winpr_library_add_private(rt)
+endif()
+
 if (ANDROID)
-    winpr_library_add(log)
+    winpr_library_add_private(log)
 endif()
 
 # Level "1" API as defined for MinCore.lib
@@ -97,7 +111,8 @@ endforeach()
 
 set(MODULE_NAME winpr)
 list(REMOVE_DUPLICATES WINPR_DEFINITIONS)
-list(REMOVE_DUPLICATES WINPR_LIBS)
+list(REMOVE_DUPLICATES WINPR_LIBS_PRIVATE)
+list(REMOVE_DUPLICATES WINPR_LIBS_PUBLIC)
 list(REMOVE_DUPLICATES WINPR_INCLUDES)
 include_directories(${WINPR_INCLUDES})
 
@@ -115,7 +130,7 @@ if (WIN32)
     @ONLY)
 
   set (WINPR_SRCS ${WINPR_SRCS} ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
-  list(APPEND WINPR_LIBS "Shlwapi")
+  winpr_library_add_public("shlwapi")
 endif()
 
 add_library(${MODULE_NAME} ${WINPR_SRCS})
@@ -126,11 +141,7 @@ if (WITH_LIBRARY_VERSIONING)
 endif()
 
 add_definitions(${WINPR_DEFINITIONS})
-if (WIN32)
-target_link_libraries(${MODULE_NAME} ${PUBLIC_KEYWORD} ${WINPR_LIBS})
-else()
-target_link_libraries(${MODULE_NAME} ${PRIVATE_KEYWORD} ${WINPR_LIBS})
-endif(WIN32)
+target_link_libraries(${MODULE_NAME} ${PRIVATE_KEYWORD} ${WINPR_LIBS_PRIVATE} ${PUBLIC_KEYWORD} ${WINPR_LIBS_PUBLIC})
 install(TARGETS ${MODULE_NAME} DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT libraries EXPORT WinPRTargets)
 if (WITH_DEBUG_SYMBOLS AND MSVC AND BUILD_SHARED_LIBS)
     get_target_property(OUTPUT_FILENAME ${MODULE_NAME} OUTPUT_NAME)

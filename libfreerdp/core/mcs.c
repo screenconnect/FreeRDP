@@ -232,7 +232,8 @@ BOOL mcs_read_domain_mcspdu_header(wStream* s, enum DomainMCSPDU* domainMCSPDU, 
 	if (!s || !domainMCSPDU || !length)
 		return FALSE;
 
-	*length = tpkt_read_header(s);
+	if (!tpkt_read_header(s, length))
+		return FALSE;
 
 	if (!tpdu_read_data(s, &li))
 		return FALSE;
@@ -299,7 +300,7 @@ static BOOL mcs_init_domain_parameters(DomainParameters* domainParameters,
 
 static BOOL mcs_read_domain_parameters(wStream* s, DomainParameters* domainParameters)
 {
-	int length;
+	size_t length;
 
 	if (!s || !domainParameters)
 		return FALSE;
@@ -324,7 +325,7 @@ static BOOL mcs_read_domain_parameters(wStream* s, DomainParameters* domainParam
 
 static BOOL mcs_write_domain_parameters(wStream* s, DomainParameters* domainParameters)
 {
-	int length;
+	size_t length;
 	wStream* tmps;
 
 	if (!s || !domainParameters)
@@ -507,13 +508,15 @@ BOOL mcs_merge_domain_parameters(DomainParameters* targetParameters,
 BOOL mcs_recv_connect_initial(rdpMcs* mcs, wStream* s)
 {
 	UINT16 li;
-	int length;
+	size_t length;
 	BOOL upwardFlag;
+	UINT16 tlength;
 
 	if (!mcs || !s)
 		return FALSE;
 
-	tpkt_read_header(s);
+	if (!tpkt_read_header(s, &tlength))
+		return FALSE;
 
 	if (!tpdu_read_data(s, &li))
 		return FALSE;
@@ -522,13 +525,13 @@ BOOL mcs_recv_connect_initial(rdpMcs* mcs, wStream* s)
 		return FALSE;
 
 	/* callingDomainSelector (OCTET_STRING) */
-	if (!ber_read_octet_string_tag(s, &length) || ((int) Stream_GetRemainingLength(s)) < length)
+	if (!ber_read_octet_string_tag(s, &length) || (Stream_GetRemainingLength(s)) < length)
 		return FALSE;
 
 	Stream_Seek(s, length);
 
 	/* calledDomainSelector (OCTET_STRING) */
-	if (!ber_read_octet_string_tag(s, &length) || ((int) Stream_GetRemainingLength(s)) < length)
+	if (!ber_read_octet_string_tag(s, &length) || (Stream_GetRemainingLength(s)) < length)
 		return FALSE;
 
 	Stream_Seek(s, length);
@@ -549,7 +552,7 @@ BOOL mcs_recv_connect_initial(rdpMcs* mcs, wStream* s)
 	if (!mcs_read_domain_parameters(s, &mcs->maximumParameters))
 		return FALSE;
 
-	if (!ber_read_octet_string_tag(s, &length) || ((int) Stream_GetRemainingLength(s)) < length)
+	if (!ber_read_octet_string_tag(s, &length) || (Stream_GetRemainingLength(s)) < length)
 		return FALSE;
 
 	if (!gcc_read_conference_create_request(s, mcs))
@@ -572,7 +575,7 @@ BOOL mcs_recv_connect_initial(rdpMcs* mcs, wStream* s)
 
 BOOL mcs_write_connect_initial(wStream* s, rdpMcs* mcs, wStream* userData)
 {
-	int length;
+	size_t length;
 	wStream* tmps;
 	BOOL ret = FALSE;
 
@@ -628,7 +631,7 @@ out:
 
 BOOL mcs_write_connect_response(wStream* s, rdpMcs* mcs, wStream* userData)
 {
-	int length;
+	size_t length;
 	wStream* tmps;
 	BOOL ret = FALSE;
 
@@ -669,9 +672,9 @@ out:
 BOOL mcs_send_connect_initial(rdpMcs* mcs)
 {
 	int status = -1;
-	int length;
+	size_t length;
 	wStream* s = NULL;
-	int bm, em;
+	size_t bm, em;
 	wStream* gcc_CCrq = NULL;
 	wStream* client_data = NULL;
 
@@ -738,7 +741,8 @@ out:
 
 BOOL mcs_recv_connect_response(rdpMcs* mcs, wStream* s)
 {
-	int length;
+	size_t length;
+	UINT16 tlength;
 	BYTE result;
 	UINT16 li;
 	UINT32 calledConnectId;
@@ -746,7 +750,8 @@ BOOL mcs_recv_connect_response(rdpMcs* mcs, wStream* s)
 	if (!mcs || !s)
 		return FALSE;
 
-	tpkt_read_header(s);
+	if (!tpkt_read_header(s, &tlength))
+		return FALSE;
 
 	if (!tpdu_read_data(s, &li))
 		return FALSE;
@@ -777,10 +782,10 @@ BOOL mcs_recv_connect_response(rdpMcs* mcs, wStream* s)
 
 BOOL mcs_send_connect_response(rdpMcs* mcs)
 {
-	int length;
+	size_t length;
 	int status;
 	wStream* s;
-	int bm, em;
+	size_t bm, em;
 	wStream* gcc_CCrsp;
 	wStream* server_data;
 

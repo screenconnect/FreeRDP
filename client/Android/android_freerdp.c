@@ -58,7 +58,7 @@
 #define FREERDP_JNI_VERSION "2.0.0"
 
 static void android_OnChannelConnectedEventHandler(
-    rdpContext* context,
+    void* context,
     ChannelConnectedEventArgs* e)
 {
 	rdpSettings* settings;
@@ -67,18 +67,18 @@ static void android_OnChannelConnectedEventHandler(
 	if (!context || !e)
 	{
 		WLog_FATAL(TAG, "%s(context=%p, EventArgs=%p",
-		           __FUNCTION__, (void*) context, (void*) e);
+		           __FUNCTION__, context, (void*) e);
 		return;
 	}
 
 	afc = (androidContext*) context;
-	settings = context->settings;
+	settings = afc->rdpCtx.settings;
 
 	if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0)
 	{
 		if (settings->SoftwareGdi)
 		{
-			gdi_graphics_pipeline_init(context->gdi,
+			gdi_graphics_pipeline_init(afc->rdpCtx.gdi,
 			                           (RdpgfxClientContext*) e->pInterface);
 		}
 		else
@@ -94,7 +94,7 @@ static void android_OnChannelConnectedEventHandler(
 }
 
 static void android_OnChannelDisconnectedEventHandler(
-    rdpContext* context, ChannelDisconnectedEventArgs* e)
+    void* context, ChannelDisconnectedEventArgs* e)
 {
 	rdpSettings* settings;
 	androidContext* afc;
@@ -102,18 +102,18 @@ static void android_OnChannelDisconnectedEventHandler(
 	if (!context || !e)
 	{
 		WLog_FATAL(TAG, "%s(context=%p, EventArgs=%p",
-		           __FUNCTION__, (void*) context, (void*) e);
+		           __FUNCTION__, context, (void*) e);
 		return;
 	}
 
 	afc = (androidContext*) context;
-	settings = context->settings;
+	settings = afc->rdpCtx.settings;
 
 	if (strcmp(e->name, RDPGFX_DVC_CHANNEL_NAME) == 0)
 	{
 		if (settings->SoftwareGdi)
 		{
-			gdi_graphics_pipeline_uninit(context->gdi,
+			gdi_graphics_pipeline_uninit(afc->rdpCtx.gdi,
 			                             (RdpgfxClientContext*) e->pInterface);
 		}
 		else
@@ -130,24 +130,6 @@ static void android_OnChannelDisconnectedEventHandler(
 
 static BOOL android_begin_paint(rdpContext* context)
 {
-	rdpGdi* gdi;
-	HGDI_WND hwnd;
-
-	if (!context)
-		return FALSE;
-
-	gdi = context->gdi;
-
-	if (!gdi || !gdi->primary || !gdi->primary->hdc)
-		return FALSE;
-
-	hwnd = gdi->primary->hdc->hwnd;
-
-	if (!hwnd || !hwnd->invalid)
-		return FALSE;
-
-	hwnd->invalid->null = TRUE;
-	hwnd->ninvalid = 0;
 	return TRUE;
 }
 
@@ -182,9 +164,9 @@ static BOOL android_end_paint(rdpContext* context)
 
 	ninvalid = hwnd->ninvalid;
 
-	if (ninvalid == 0)
+	if (ninvalid < 1)
 		return TRUE;
-
+	
 	cinvalid = hwnd->cinvalid;
 
 	if (!cinvalid)
@@ -205,6 +187,9 @@ static BOOL android_end_paint(rdpContext* context)
 
 	freerdp_callback("OnGraphicsUpdate", "(JIIII)V", (jlong)context->instance,
 	                 x1, y1, x2 - x1, y2 - y1);
+
+	hwnd->invalid->null = TRUE;
+	hwnd->ninvalid = 0;
 	return TRUE;
 }
 
@@ -223,44 +208,17 @@ static BOOL android_pre_connect(freerdp* instance)
 {
 	int rc;
 	rdpSettings* settings;
-	BOOL bitmap_cache;
 
 	if (!instance)
 		return FALSE;
 
 	settings = instance->settings;
 
-	if (!settings || !settings->OrderSupport)
+	if (!settings)
 		return FALSE;
 
-	bitmap_cache = settings->BitmapCacheEnabled;
-	settings->OrderSupport[NEG_DSTBLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_PATBLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_SCRBLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_OPAQUE_RECT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_DRAWNINEGRID_INDEX] = FALSE;
-	settings->OrderSupport[NEG_MULTIDSTBLT_INDEX] = FALSE;
-	settings->OrderSupport[NEG_MULTIPATBLT_INDEX] = FALSE;
-	settings->OrderSupport[NEG_MULTISCRBLT_INDEX] = FALSE;
-	settings->OrderSupport[NEG_MULTIOPAQUERECT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_MULTI_DRAWNINEGRID_INDEX] = FALSE;
-	settings->OrderSupport[NEG_LINETO_INDEX] = TRUE;
-	settings->OrderSupport[NEG_POLYLINE_INDEX] = TRUE;
-	settings->OrderSupport[NEG_MEMBLT_INDEX] = bitmap_cache;
-	settings->OrderSupport[NEG_MEM3BLT_INDEX] = TRUE;
-	settings->OrderSupport[NEG_MEMBLT_V2_INDEX] = bitmap_cache;
-	settings->OrderSupport[NEG_MEM3BLT_V2_INDEX] = FALSE;
-	settings->OrderSupport[NEG_SAVEBITMAP_INDEX] = FALSE;
-	settings->OrderSupport[NEG_GLYPH_INDEX_INDEX] = TRUE;
-	settings->OrderSupport[NEG_FAST_INDEX_INDEX] = TRUE;
-	settings->OrderSupport[NEG_FAST_GLYPH_INDEX] = TRUE;
-	settings->OrderSupport[NEG_POLYGON_SC_INDEX] = FALSE;
-	settings->OrderSupport[NEG_POLYGON_CB_INDEX] = FALSE;
-	settings->OrderSupport[NEG_ELLIPSE_SC_INDEX] = FALSE;
-	settings->OrderSupport[NEG_ELLIPSE_CB_INDEX] = FALSE;
 	rc = PubSub_SubscribeChannelConnected(
 	         instance->context->pubSub,
-	         (pChannelConnectedEventHandler)
 	         android_OnChannelConnectedEventHandler);
 
 	if (rc != CHANNEL_RC_OK)
@@ -271,7 +229,6 @@ static BOOL android_pre_connect(freerdp* instance)
 
 	rc = PubSub_SubscribeChannelDisconnected(
 	         instance->context->pubSub,
-	         (pChannelDisconnectedEventHandler)
 	         android_OnChannelDisconnectedEventHandler);
 
 	if (rc != CHANNEL_RC_OK)
@@ -377,7 +334,6 @@ static BOOL android_post_connect(freerdp* instance)
 	instance->update->BeginPaint = android_begin_paint;
 	instance->update->EndPaint = android_end_paint;
 	instance->update->DesktopResize = android_desktop_resize;
-	pointer_cache_register_callbacks(update);
 	freerdp_callback("OnSettingsChanged", "(JIII)V", (jlong)instance,
 	                 settings->DesktopWidth, settings->DesktopHeight,
 	                 settings->ColorDepth);
@@ -450,7 +406,7 @@ static DWORD android_verify_certificate(
 	WLog_DBG(TAG,
 	         "The above X.509 certificate could not be verified, possibly because you do not have "
 	         "the CA certificate in your certificate store, or the certificate has expired."
-	         "Please look at the documentation on how to create local certificate store for a private CA.\n");
+	         "Please look at the OpenSSL documentation on how to add a private CA to the store.\n");
 	JNIEnv* env;
 	jboolean attached = jni_attach_thread(&env);
 	jstring jstr0 = (*env)->NewStringUTF(env, common_name);
@@ -496,7 +452,7 @@ static DWORD android_verify_changed_certificate(freerdp* instance,
 	return res;
 }
 
-static void* jni_input_thread(void* arg)
+static DWORD WINAPI jni_input_thread(LPVOID arg)
 {
 	HANDLE event[2];
 	wMessageQueue* queue;
@@ -538,7 +494,7 @@ static void* jni_input_thread(void* arg)
 disconnect:
 	MessageQueue_PostQuit(queue, 0);
 	ExitThread(0);
-	return NULL;
+	return 0;
 }
 
 static int android_freerdp_run(freerdp* instance)
@@ -555,8 +511,7 @@ static int android_freerdp_run(freerdp* instance)
 
 	if (async_input)
 	{
-		if (!(inputThread = CreateThread(NULL, 0,
-		                                 (LPTHREAD_START_ROUTINE) jni_input_thread, instance, 0, NULL)))
+		if (!(inputThread = CreateThread(NULL, 0, jni_input_thread, instance, 0, NULL)))
 		{
 			WLog_ERR(TAG, "async input: failed to create input thread");
 			goto disconnect;
@@ -622,6 +577,8 @@ disconnect:
 
 	if (async_input && inputThread)
 	{
+		wMessageQueue* input_queue = freerdp_get_message_queue(instance, FREERDP_INPUT_MESSAGE_QUEUE);
+		MessageQueue_PostQuit(input_queue, 0);
 		WaitForSingleObject(inputThread, INFINITE);
 		CloseHandle(inputThread);
 	}
@@ -629,7 +586,7 @@ disconnect:
 	return status;
 }
 
-static void* android_thread_func(void* param)
+static DWORD WINAPI android_thread_func(LPVOID param)
 {
 	DWORD status = ERROR_BAD_ARGUMENTS;
 	freerdp* instance = param;
@@ -669,7 +626,7 @@ fail:
 
 	WLog_DBG(TAG, "Quit.");
 	ExitThread(status);
-	return NULL;
+	return status;
 }
 
 static BOOL android_client_new(freerdp* instance, rdpContext* context)
@@ -821,6 +778,17 @@ static void JNICALL jni_freerdp_free(JNIEnv* env, jclass cls, jlong instance)
 #endif
 }
 
+static jstring JNICALL jni_freerdp_get_last_error_string(JNIEnv* env, jclass cls, jlong instance)
+{
+	freerdp* inst = (freerdp*)instance;
+
+	if (!inst || !inst->context)
+		return (*env)->NewStringUTF(env, "");
+
+	return (*env)->NewStringUTF(env,
+	                            freerdp_get_last_error_string(freerdp_get_last_error(inst->context)));
+}
+
 static jboolean JNICALL jni_freerdp_parse_arguments(
     JNIEnv* env, jclass cls, jlong instance, jobjectArray arguments)
 {
@@ -871,9 +839,8 @@ static jboolean JNICALL jni_freerdp_connect(JNIEnv* env, jclass cls,
 
 	ctx = (androidContext*)inst->context;
 
-	if (!(ctx->thread = CreateThread(
-	                        NULL, 0, (LPTHREAD_START_ROUTINE)android_thread_func,
-	                        inst, 0, NULL)))
+	if (!(ctx->thread = CreateThread(NULL, 0, android_thread_func,
+	                                 inst, 0, NULL)))
 	{
 		return JNI_FALSE;
 	}
@@ -1008,11 +975,12 @@ static jboolean JNICALL jni_freerdp_send_key_event(
 }
 
 static jboolean JNICALL jni_freerdp_send_unicodekey_event(
-    JNIEnv* env, jclass cls, jlong instance, jint keycode)
+    JNIEnv* env, jclass cls, jlong instance, jint keycode, jboolean down)
 {
 	ANDROID_EVENT* event;
 	freerdp* inst = (freerdp*)instance;
-	event = (ANDROID_EVENT*) android_event_unicodekey_new(keycode);
+	UINT16 flags = (down == JNI_TRUE) ? 0 : KBD_FLAGS_RELEASE;
+	event = (ANDROID_EVENT*) android_event_unicodekey_new(flags, keycode);
 
 	if (!event)
 		return JNI_FALSE;
@@ -1056,7 +1024,7 @@ static jboolean JNICALL jni_freerdp_send_clipboard_data(
 	const jbyte* data = jdata != NULL ? (*env)->GetStringUTFChars(env, jdata,
 	                    NULL) : NULL;
 	int data_length = data ? strlen(data) : 0;
-	jboolean ret = JNI_FALSE;;
+	jboolean ret = JNI_FALSE;
 	event = (ANDROID_EVENT*) android_event_clipboard_new((void*)data, data_length);
 
 	if (!event)
@@ -1131,6 +1099,11 @@ static JNINativeMethod methods[] =
 		&jni_freerdp_get_build_config
 	},
 	{
+		"freerdp_get_last_error_string",
+		"(J)Ljava/lang/String;",
+		&jni_freerdp_get_last_error_string
+	},
+	{
 		"freerdp_new",
 		"(Landroid/content/Context;)J",
 		&jni_freerdp_new
@@ -1172,7 +1145,7 @@ static JNINativeMethod methods[] =
 	},
 	{
 		"freerdp_send_unicodekey_event",
-		"(JI)Z",
+		"(JIZ)Z",
 		&jni_freerdp_send_unicodekey_event
 	},
 	{

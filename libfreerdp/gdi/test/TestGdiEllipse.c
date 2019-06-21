@@ -103,6 +103,8 @@ int TestGdiEllipse(int argc, char* argv[])
 	};
 	const UINT32 number_formats = sizeof(colorFormats) / sizeof(colorFormats[0]);
 	gdiPalette g;
+	WINPR_UNUSED(argc);
+	WINPR_UNUSED(argv);
 
 	for (i = 0; i < number_formats; i++)
 	{
@@ -117,7 +119,7 @@ int TestGdiEllipse(int argc, char* argv[])
 		g.format = format;
 
 		for (j = 0; j < 256; j++)
-			g.palette[i] = GetColor(format, j, j, j, 0xFF);
+			g.palette[i] = FreeRDPGetColor(format, j, j, j, 0xFF);
 
 		rc = -1;
 

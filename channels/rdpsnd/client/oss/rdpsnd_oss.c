@@ -47,7 +47,6 @@
 #include <sys/ioctl.h>
 
 #include <freerdp/types.h>
-#include <freerdp/codec/dsp.h>
 #include <freerdp/channels/log.h>
 
 #include "rdpsnd_main.h"
@@ -64,10 +63,8 @@ struct rdpsnd_oss_plugin
 
 	int supported_formats;
 
-	int latency;
+	UINT32 latency;
 	AUDIO_FORMAT format;
-
-	FREERDP_DSP_CONTEXT* dsp_context;
 };
 
 #define OSS_LOG_ERR(_text, _error) \
@@ -77,36 +74,33 @@ struct rdpsnd_oss_plugin
 	}
 
 
-static int rdpsnd_oss_get_format(AUDIO_FORMAT* format)
+static int rdpsnd_oss_get_format(const AUDIO_FORMAT* format)
 {
 	switch (format->wFormatTag)
 	{
 		case WAVE_FORMAT_PCM:
-
 			switch (format->wBitsPerSample)
 			{
 				case 8:
 					return AFMT_S8;
+
 				case 16:
 					return AFMT_S16_LE;
 			}
 
 			break;
+
 		case WAVE_FORMAT_ALAW:
 			return AFMT_A_LAW;
-#if 0 /* This does not work on my desktop. */
+
 		case WAVE_FORMAT_MULAW:
 			return AFMT_MU_LAW;
-#endif
-		case WAVE_FORMAT_ADPCM:
-		case WAVE_FORMAT_DVI_ADPCM:
-			return AFMT_S16_LE;
 	}
 
 	return 0;
 }
 
-static BOOL rdpsnd_oss_format_supported(rdpsndDevicePlugin* device, AUDIO_FORMAT* format)
+static BOOL rdpsnd_oss_format_supported(rdpsndDevicePlugin* device, const AUDIO_FORMAT* format)
 {
 	int req_fmt = 0;
 	rdpsndOssPlugin* oss = (rdpsndOssPlugin*)device;
@@ -117,23 +111,20 @@ static BOOL rdpsnd_oss_format_supported(rdpsndDevicePlugin* device, AUDIO_FORMAT
 	switch (format->wFormatTag)
 	{
 		case WAVE_FORMAT_PCM:
-
 			if (format->cbSize != 0 ||
-					format->nSamplesPerSec > 48000 ||
-					(format->wBitsPerSample != 8 && format->wBitsPerSample != 16) ||
-					(format->nChannels != 1 && format->nChannels != 2))
+			    format->nSamplesPerSec > 48000 ||
+			    (format->wBitsPerSample != 8 && format->wBitsPerSample != 16) ||
+			    (format->nChannels != 1 && format->nChannels != 2))
 				return FALSE;
 
 			break;
-		case WAVE_FORMAT_ADPCM:
-		case WAVE_FORMAT_DVI_ADPCM:
 
-			if (format->nSamplesPerSec > 48000 ||
-					format->wBitsPerSample != 4 ||
-					(format->nChannels != 1 && format->nChannels != 2))
-				return FALSE;
-
+		case WAVE_FORMAT_MULAW:
+		case WAVE_FORMAT_ALAW:
 			break;
+
+		default:
+			return FALSE;
 	}
 
 	req_fmt = rdpsnd_oss_get_format(format);
@@ -153,7 +144,8 @@ static BOOL rdpsnd_oss_format_supported(rdpsndDevicePlugin* device, AUDIO_FORMAT
 	return TRUE;
 }
 
-static BOOL rdpsnd_oss_set_format(rdpsndDevicePlugin* device, AUDIO_FORMAT* format, int latency)
+static BOOL rdpsnd_oss_set_format(rdpsndDevicePlugin* device, const AUDIO_FORMAT* format,
+                                  UINT32 latency)
 {
 	int tmp;
 	rdpsndOssPlugin* oss = (rdpsndOssPlugin*)device;
@@ -225,7 +217,7 @@ static void rdpsnd_oss_open_mixer(rdpsndOssPlugin* oss)
 	}
 }
 
-static BOOL rdpsnd_oss_open(rdpsndDevicePlugin* device, AUDIO_FORMAT* format, int latency)
+static BOOL rdpsnd_oss_open(rdpsndDevicePlugin* device, const AUDIO_FORMAT* format, UINT32 latency)
 {
 	char dev_name[PATH_MAX] = "/dev/dsp";
 	rdpsndOssPlugin* oss = (rdpsndOssPlugin*)device;
@@ -270,7 +262,6 @@ static BOOL rdpsnd_oss_open(rdpsndDevicePlugin* device, AUDIO_FORMAT* format, in
 		return FALSE;
 	}
 
-	freerdp_dsp_context_reset_adpcm(oss->dsp_context);
 	rdpsnd_oss_set_format(device, format, latency);
 	rdpsnd_oss_open_mixer(oss);
 	return TRUE;
@@ -306,7 +297,6 @@ static void rdpsnd_oss_free(rdpsndDevicePlugin* device)
 		return;
 
 	rdpsnd_oss_close(device);
-	freerdp_dsp_context_free(oss->dsp_context);
 	free(oss);
 }
 
@@ -368,65 +358,35 @@ static BOOL rdpsnd_oss_set_volume(rdpsndDevicePlugin* device, UINT32 value)
 	return TRUE;
 }
 
-static BOOL rdpsnd_oss_wave_decode(rdpsndDevicePlugin* device, RDPSND_WAVE* wave)
+static UINT rdpsnd_oss_play(rdpsndDevicePlugin* device, const BYTE* data, size_t size)
 {
 	rdpsndOssPlugin* oss = (rdpsndOssPlugin*)device;
 
-	if (device == NULL || wave == NULL)
-		return FALSE;
+	if (device == NULL || oss->mixer_handle == -1)
+		return 0;
 
-	switch (oss->format.wFormatTag)
+	while (size > 0)
 	{
-		case WAVE_FORMAT_ADPCM:
-			oss->dsp_context->decode_ms_adpcm(oss->dsp_context,
-											  wave->data, wave->length, oss->format.nChannels, oss->format.nBlockAlign);
-			wave->length = oss->dsp_context->adpcm_size;
-			wave->data = oss->dsp_context->adpcm_buffer;
-			break;
-		case WAVE_FORMAT_DVI_ADPCM:
-			oss->dsp_context->decode_ima_adpcm(oss->dsp_context,
-											   wave->data, wave->length, oss->format.nChannels, oss->format.nBlockAlign);
-			wave->length = oss->dsp_context->adpcm_size;
-			wave->data = oss->dsp_context->adpcm_buffer;
-			break;
-	}
-	return TRUE;
-}
-
-static void rdpsnd_oss_wave_play(rdpsndDevicePlugin* device, RDPSND_WAVE* wave)
-{
-	BYTE* data;
-	int offset, size, status, latency;
-	rdpsndOssPlugin* oss = (rdpsndOssPlugin*)device;
-
-	if (device == NULL || wave == NULL)
-		return;
-
-	offset = 0;
-	data = wave->data;
-	size = wave->length;
-	latency = oss->latency;
-
-	while (offset < size)
-	{
-		status = write(oss->pcm_handle, &data[offset], (size - offset));
+		ssize_t status = write(oss->pcm_handle, data, size);
 
 		if (status < 0)
 		{
 			OSS_LOG_ERR("write fail", errno);
 			rdpsnd_oss_close(device);
-			rdpsnd_oss_open(device, NULL, latency);
+			rdpsnd_oss_open(device, NULL, oss->latency);
 			break;
 		}
 
-		offset += status;
+		data += status;
+
+		if ((size_t)status <= size)
+			size -= (size_t)status;
+		else
+			size = 0;
 	}
 
-	/* From rdpsnd_main.c */
-	wave->wTimeStampB = wave->wTimeStampA + wave->wAudioLength + 65 + latency;
-	wave->wLocalTimeB = wave->wLocalTimeA + wave->wAudioLength + 65 + latency;
+	return 10; /* TODO: Get real latency in [ms] */
 }
-
 
 static COMMAND_LINE_ARGUMENT_A rdpsnd_oss_args[] =
 {
@@ -442,12 +402,14 @@ static int rdpsnd_oss_parse_addin_args(rdpsndDevicePlugin* device, ADDIN_ARGV* a
 	COMMAND_LINE_ARGUMENT_A* arg;
 	rdpsndOssPlugin* oss = (rdpsndOssPlugin*)device;
 	flags = COMMAND_LINE_SIGIL_NONE | COMMAND_LINE_SEPARATOR_COLON | COMMAND_LINE_IGN_UNKNOWN_KEYWORD;
-	status = CommandLineParseArgumentsA(args->argc, (const char**)args->argv, rdpsnd_oss_args, flags, oss, NULL, NULL);
+	status = CommandLineParseArgumentsA(args->argc, args->argv, rdpsnd_oss_args, flags,
+	                                    oss, NULL, NULL);
 
 	if (status < 0)
 		return status;
 
 	arg = rdpsnd_oss_args;
+	errno = 0;
 
 	do
 	{
@@ -458,10 +420,21 @@ static int rdpsnd_oss_parse_addin_args(rdpsndDevicePlugin* device, ADDIN_ARGV* a
 		CommandLineSwitchCase(arg, "dev")
 		{
 			str_num = _strdup(arg->Value);
+
 			if (!str_num)
 				return ERROR_OUTOFMEMORY;
 
-			oss->dev_unit = strtol(str_num, &eptr, 10);
+			{
+				long val = strtol(str_num, &eptr, 10);
+
+				if ((errno != 0) || (val < INT32_MIN) || (val > INT32_MAX))
+				{
+					free(str_num);
+					return CHANNEL_RC_NULL_DATA;
+				}
+
+				oss->dev_unit = val;
+			}
 
 			if (oss->dev_unit < 0 || *eptr != '\0')
 				oss->dev_unit = -1;
@@ -491,15 +464,15 @@ UINT freerdp_rdpsnd_client_subsystem_entry(PFREERDP_RDPSND_DEVICE_ENTRY_POINTS p
 	ADDIN_ARGV* args;
 	rdpsndOssPlugin* oss;
 	oss = (rdpsndOssPlugin*)calloc(1, sizeof(rdpsndOssPlugin));
+
 	if (!oss)
 		return CHANNEL_RC_NO_MEMORY;
+
 	oss->device.Open = rdpsnd_oss_open;
 	oss->device.FormatSupported = rdpsnd_oss_format_supported;
-	oss->device.SetFormat = rdpsnd_oss_set_format;
 	oss->device.GetVolume = rdpsnd_oss_get_volume;
 	oss->device.SetVolume = rdpsnd_oss_set_volume;
-	oss->device.WaveDecode = rdpsnd_oss_wave_decode;
-	oss->device.WavePlay = rdpsnd_oss_wave_play;
+	oss->device.Play = rdpsnd_oss_play;
 	oss->device.Close = rdpsnd_oss_close;
 	oss->device.Free = rdpsnd_oss_free;
 	oss->pcm_handle = -1;
@@ -507,14 +480,6 @@ UINT freerdp_rdpsnd_client_subsystem_entry(PFREERDP_RDPSND_DEVICE_ENTRY_POINTS p
 	oss->dev_unit = -1;
 	args = pEntryPoints->args;
 	rdpsnd_oss_parse_addin_args((rdpsndDevicePlugin*)oss, args);
-	oss->dsp_context = freerdp_dsp_context_new();
-	if (!oss->dsp_context)
-	{
-		free(oss);
-		return CHANNEL_RC_NO_MEMORY;
-	}
-
 	pEntryPoints->pRegisterRdpsndDevice(pEntryPoints->rdpsnd, (rdpsndDevicePlugin*)oss);
-
 	return CHANNEL_RC_OK;
 }

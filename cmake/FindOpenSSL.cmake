@@ -63,13 +63,13 @@ FIND_PATH(OPENSSL_INCLUDE_DIR
     include
 )
 
-IF(WIN32)
+IF(MSVC)
   if(${MSVC_RUNTIME} STREQUAL "static")
     set(MSVC_RUNTIME_SUFFIX "MT")
   else()
     set(MSVC_RUNTIME_SUFFIX "MD")
   endif()
-ENDIF(WIN32)
+ENDIF(MSVC)
 
 IF(ANDROID)
     FIND_LIBRARY(OPENSSL_LIBRARIES
@@ -96,8 +96,6 @@ ELSEIF(WIN32 AND NOT CYGWIN)
     # We are using the libraries located in the VC subdir instead of the parent directory even though :
     # libeay32MD.lib is identical to ../libeay32.lib, and
     # ssleay32MD.lib is identical to ../ssleay32.lib
-	# libeay32.dll -> libcrypto.dll
-	# ssleay32.dll -> libssl.dll
 
     if(DEFINED OPENSSL_STATIC)
       set(MSVC_RUNTIME_PATH_SUFFIX "lib/VC/static")
@@ -107,8 +105,10 @@ ELSEIF(WIN32 AND NOT CYGWIN)
 
     FIND_LIBRARY(LIB_EAY_DEBUG
       NAMES
-        "libcrypto32${MSVC_RUNTIME_SUFFIX}d"
-        libcrypto32
+        "libeay32${MSVC_RUNTIME_SUFFIX}d"
+        libeay32
+        libcrypto
+        libcrypto-1_1
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
       PATH_SUFFIXES
         ${MSVC_RUNTIME_PATH_SUFFIX}
@@ -119,8 +119,10 @@ ELSEIF(WIN32 AND NOT CYGWIN)
 
     FIND_LIBRARY(LIB_EAY_RELEASE
       NAMES
-        "libcrypto32${MSVC_RUNTIME_SUFFIX}"
-        libcrypto32
+        "libeay32${MSVC_RUNTIME_SUFFIX}"
+        libeay32
+        libcrypto
+        libcrypto-1_1
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
       PATH_SUFFIXES
         ${MSVC_RUNTIME_PATH_SUFFIX}
@@ -131,9 +133,11 @@ ELSEIF(WIN32 AND NOT CYGWIN)
 
     FIND_LIBRARY(SSL_EAY_DEBUG
       NAMES
-        "libssl32${MSVC_RUNTIME_SUFFIX}d"
-        libssl32
+        "ssleay32${MSVC_RUNTIME_SUFFIX}d"
+        ssleay32
         ssl
+        libssl
+        libssl-1_1
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
       PATH_SUFFIXES
         ${MSVC_RUNTIME_PATH_SUFFIX}
@@ -144,9 +148,11 @@ ELSEIF(WIN32 AND NOT CYGWIN)
 
     FIND_LIBRARY(SSL_EAY_RELEASE
       NAMES
-        "libssl32${MSVC_RUNTIME_SUFFIX}"
-        libssl32
+        "ssleay32${MSVC_RUNTIME_SUFFIX}"
+        ssleay32
         ssl
+        libssl
+        libssl-1_1
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
       PATH_SUFFIXES
         ${MSVC_RUNTIME_PATH_SUFFIX}
@@ -166,6 +172,7 @@ ELSEIF(WIN32 AND NOT CYGWIN)
     FIND_LIBRARY(LIB_EAY
       NAMES
         libeay32
+        libcrypto
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
       PATH_SUFFIXES
         "lib"
@@ -175,6 +182,7 @@ ELSEIF(WIN32 AND NOT CYGWIN)
     FIND_LIBRARY(SSL_EAY
       NAMES
         ssleay32
+        libssl
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
       PATH_SUFFIXES
         "lib"
@@ -188,6 +196,8 @@ ELSEIF(WIN32 AND NOT CYGWIN)
     FIND_LIBRARY(LIB_EAY
       NAMES
         libeay32
+        libcrypto
+        libcrypto-1_1
       HINTS
         ${_OPENSSL_LIBDIR}
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
@@ -198,6 +208,8 @@ ELSEIF(WIN32 AND NOT CYGWIN)
     FIND_LIBRARY(SSL_EAY
       NAMES
         ssleay32
+        libssl
+        libssl-1_1
       HINTS
         ${_OPENSSL_LIBDIR}
       ${_OPENSSL_ROOT_HINTS_AND_PATHS}
@@ -214,6 +226,7 @@ ELSE(WIN32 AND NOT CYGWIN)
     NAMES
       ssl
       ssleay32
+      libssl-1_1
       "ssleay32${MSVC_RUNTIME_SUFFIX}"
     HINTS
       ${_OPENSSL_LIBDIR}
@@ -225,6 +238,7 @@ ELSE(WIN32 AND NOT CYGWIN)
   FIND_LIBRARY(OPENSSL_CRYPTO_LIBRARY
     NAMES
       crypto
+      libcrypto-1_1
     HINTS
       ${_OPENSSL_LIBDIR}
     ${_OPENSSL_ROOT_HINTS_AND_PATHS}

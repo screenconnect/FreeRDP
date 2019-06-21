@@ -29,29 +29,39 @@
 
 #define TAG FREERDP_TAG("utils")
 
-PROFILER* profiler_create(char* name)
+struct _PROFILER
 {
-	PROFILER* profiler;
-	profiler = (PROFILER*) malloc(sizeof(PROFILER));
+	char* name;
+	STOPWATCH* stopwatch;
+};
+
+PROFILER* profiler_create(const char* name)
+{
+	PROFILER* profiler = (PROFILER*) calloc(1, sizeof(PROFILER));
 
 	if (!profiler)
 		return NULL;
 
-	profiler->name = name;
+	profiler->name = _strdup(name);
 	profiler->stopwatch = stopwatch_create();
 
-	if (!profiler->stopwatch)
-	{
-		free(profiler);
-		return NULL;
-	}
+	if (!profiler->name || !profiler->stopwatch)
+		goto fail;
 
 	return profiler;
+fail:
+	profiler_free(profiler);
+	return NULL;
 }
 
 void profiler_free(PROFILER* profiler)
 {
-	stopwatch_free(profiler->stopwatch);
+	if (profiler)
+	{
+		free(profiler->name);
+		stopwatch_free(profiler->stopwatch);
+	}
+
 	free(profiler);
 }
 
@@ -76,9 +86,8 @@ void profiler_print(PROFILER* profiler)
 {
 	double s = stopwatch_get_elapsed_time_in_seconds(profiler->stopwatch);
 	double avg = profiler->stopwatch->count == 0 ? 0 : s / profiler->stopwatch->count;
-
 	WLog_INFO(TAG, "%-30s | %10u | %10.4fs | %8.6fs | %6.0f",
-		profiler->name, profiler->stopwatch->count, s, avg, profiler->stopwatch->count / s);
+	          profiler->name, profiler->stopwatch->count, s, avg, profiler->stopwatch->count / s);
 }
 
 void profiler_print_footer(void)

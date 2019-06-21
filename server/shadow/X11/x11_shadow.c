@@ -46,7 +46,7 @@
 
 #define TAG SERVER_TAG("shadow.x11")
 
-static int x11_shadow_enum_monitors(MONITOR_DEF* monitors, int maxMonitors);
+static UINT32 x11_shadow_enum_monitors(MONITOR_DEF* monitors, UINT32 maxMonitors);
 
 #ifdef WITH_PAM
 
@@ -162,12 +162,14 @@ static int x11_shadow_pam_get_service_name(SHADOW_PAM_AUTH_INFO* info)
 	return 1;
 }
 
-static int x11_shadow_pam_authenticate(x11ShadowSubsystem* subsystem,
+static int x11_shadow_pam_authenticate(rdpShadowSubsystem* subsystem,
                                        rdpShadowClient* client, const char* user, const char* domain,
                                        const char* password)
 {
 	int pam_status;
 	SHADOW_PAM_AUTH_INFO* info;
+	WINPR_UNUSED(subsystem);
+	WINPR_UNUSED(client);
 	info = calloc(1, sizeof(SHADOW_PAM_AUTH_INFO));
 
 	if (!info)
@@ -219,18 +221,25 @@ static int x11_shadow_pam_authenticate(x11ShadowSubsystem* subsystem,
 
 #endif
 
-static void x11_shadow_input_synchronize_event(x11ShadowSubsystem* subsystem,
+static BOOL x11_shadow_input_synchronize_event(rdpShadowSubsystem* subsystem,
         rdpShadowClient* client, UINT32 flags)
 {
+	/* TODO: Implement */
+	WLog_WARN(TAG, "%s not implemented", __FUNCTION__);
+	return TRUE;
 }
 
-static void x11_shadow_input_keyboard_event(x11ShadowSubsystem* subsystem,
+static BOOL x11_shadow_input_keyboard_event(rdpShadowSubsystem* subsystem,
         rdpShadowClient* client, UINT16 flags, UINT16 code)
 {
 #ifdef WITH_XTEST
+	x11ShadowSubsystem* x11 = (x11ShadowSubsystem*)subsystem;
 	DWORD vkcode;
 	DWORD keycode;
 	BOOL extended = FALSE;
+
+	if (!client || !subsystem)
+		return FALSE;
 
 	if (flags & KBD_FLAGS_EXTENDED)
 		extended = TRUE;
@@ -247,43 +256,60 @@ static void x11_shadow_input_keyboard_event(x11ShadowSubsystem* subsystem,
 
 	if (keycode != 0)
 	{
-		XLockDisplay(subsystem->display);
-		XTestGrabControl(subsystem->display, True);
+		XLockDisplay(x11->display);
+		XTestGrabControl(x11->display, True);
 
 		if (flags & KBD_FLAGS_DOWN)
-			XTestFakeKeyEvent(subsystem->display, keycode, True, CurrentTime);
+			XTestFakeKeyEvent(x11->display, keycode, True, CurrentTime);
 		else if (flags & KBD_FLAGS_RELEASE)
-			XTestFakeKeyEvent(subsystem->display, keycode, False, CurrentTime);
+			XTestFakeKeyEvent(x11->display, keycode, False, CurrentTime);
 
-		XTestGrabControl(subsystem->display, False);
-		XFlush(subsystem->display);
-		XUnlockDisplay(subsystem->display);
+		XTestGrabControl(x11->display, False);
+		XFlush(x11->display);
+		XUnlockDisplay(x11->display);
 	}
 
 #endif
+	return TRUE;
 }
 
-static void x11_shadow_input_unicode_keyboard_event(x11ShadowSubsystem*
+static BOOL x11_shadow_input_unicode_keyboard_event(rdpShadowSubsystem*
         subsystem,
         rdpShadowClient* client, UINT16 flags, UINT16 code)
 {
+	/* TODO: Implement */
+	WLog_WARN(TAG, "%s not implemented", __FUNCTION__);
+	return TRUE;
 }
 
-static void x11_shadow_input_mouse_event(x11ShadowSubsystem* subsystem,
+static BOOL x11_shadow_input_mouse_event(rdpShadowSubsystem* subsystem,
         rdpShadowClient* client, UINT16 flags, UINT16 x, UINT16 y)
 {
 #ifdef WITH_XTEST
+	x11ShadowSubsystem* x11 = (x11ShadowSubsystem*)subsystem;
 	int button = 0;
 	BOOL down = FALSE;
 	rdpShadowServer* server;
 	rdpShadowSurface* surface;
+
+	if (!subsystem || !client)
+		return FALSE;
+
 	server = subsystem->server;
+
+	if (!server)
+		return FALSE;
+
 	surface = server->surface;
-	subsystem->lastMouseClient = client;
+
+	if (!surface)
+		return FALSE;
+
+	x11->lastMouseClient = client;
 	x += surface->x;
 	y += surface->y;
-	XLockDisplay(subsystem->display);
-	XTestGrabControl(subsystem->display, True);
+	XLockDisplay(x11->display);
+	XTestGrabControl(x11->display, True);
 
 	if (flags & PTR_FLAGS_WHEEL)
 	{
@@ -293,13 +319,13 @@ static void x11_shadow_input_mouse_event(x11ShadowSubsystem* subsystem,
 			negative = TRUE;
 
 		button = (negative) ? 5 : 4;
-		XTestFakeButtonEvent(subsystem->display, button, True, CurrentTime);
-		XTestFakeButtonEvent(subsystem->display, button, False, CurrentTime);
+		XTestFakeButtonEvent(x11->display, button, True, CurrentTime);
+		XTestFakeButtonEvent(x11->display, button, False, CurrentTime);
 	}
 	else
 	{
 		if (flags & PTR_FLAGS_MOVE)
-			XTestFakeMotionEvent(subsystem->display, 0, x, y, CurrentTime);
+			XTestFakeMotionEvent(x11->display, 0, x, y, CurrentTime);
 
 		if (flags & PTR_FLAGS_BUTTON1)
 			button = 1;
@@ -312,31 +338,45 @@ static void x11_shadow_input_mouse_event(x11ShadowSubsystem* subsystem,
 			down = TRUE;
 
 		if (button)
-			XTestFakeButtonEvent(subsystem->display, button, down, CurrentTime);
+			XTestFakeButtonEvent(x11->display, button, down, CurrentTime);
 	}
 
-	XTestGrabControl(subsystem->display, False);
-	XFlush(subsystem->display);
-	XUnlockDisplay(subsystem->display);
+	XTestGrabControl(x11->display, False);
+	XFlush(x11->display);
+	XUnlockDisplay(x11->display);
 #endif
+	return TRUE;
 }
 
-static void x11_shadow_input_extended_mouse_event(x11ShadowSubsystem* subsystem,
+static BOOL x11_shadow_input_extended_mouse_event(rdpShadowSubsystem* subsystem,
         rdpShadowClient* client, UINT16 flags, UINT16 x, UINT16 y)
 {
 #ifdef WITH_XTEST
+	x11ShadowSubsystem* x11 = (x11ShadowSubsystem*)subsystem;
 	int button = 0;
 	BOOL down = FALSE;
 	rdpShadowServer* server;
 	rdpShadowSurface* surface;
+
+	if (!subsystem || !client)
+		return FALSE;
+
 	server = subsystem->server;
+
+	if (!server)
+		return FALSE;
+
 	surface = server->surface;
-	subsystem->lastMouseClient = client;
+
+	if (!surface)
+		return FALSE;
+
+	x11->lastMouseClient = client;
 	x += surface->x;
 	y += surface->y;
-	XLockDisplay(subsystem->display);
-	XTestGrabControl(subsystem->display, True);
-	XTestFakeMotionEvent(subsystem->display, 0, x, y, CurrentTime);
+	XLockDisplay(x11->display);
+	XTestGrabControl(x11->display, True);
+	XTestFakeMotionEvent(x11->display, 0, x, y, CurrentTime);
 
 	if (flags & PTR_XFLAGS_BUTTON1)
 		button = 8;
@@ -347,12 +387,13 @@ static void x11_shadow_input_extended_mouse_event(x11ShadowSubsystem* subsystem,
 		down = TRUE;
 
 	if (button)
-		XTestFakeButtonEvent(subsystem->display, button, down, CurrentTime);
+		XTestFakeButtonEvent(x11->display, button, down, CurrentTime);
 
-	XTestGrabControl(subsystem->display, False);
-	XFlush(subsystem->display);
-	XUnlockDisplay(subsystem->display);
+	XTestGrabControl(x11->display, False);
+	XFlush(x11->display);
+	XUnlockDisplay(x11->display);
 #endif
+	return TRUE;
 }
 
 static void x11_shadow_message_free(UINT32 id, SHADOW_MSG_OUT* msg)
@@ -384,14 +425,13 @@ static int x11_shadow_pointer_position_update(x11ShadowSubsystem* subsystem)
 	int count = 0;
 	int index = 0;
 
-        if (!subsystem || !subsystem->server || !subsystem->server->clients)
-                return -1;
+	if (!subsystem || !subsystem->common.server || !subsystem->common.server->clients)
+		return -1;
 
-	templateMsg.xPos = subsystem->pointerX;
-	templateMsg.yPos = subsystem->pointerY;
-	templateMsg.Free = x11_shadow_message_free;
-
-	server = subsystem->server;
+	templateMsg.xPos = subsystem->common.pointerX;
+	templateMsg.yPos = subsystem->common.pointerY;
+	templateMsg.common.Free = x11_shadow_message_free;
+	server = subsystem->common.server;
 	ArrayList_Lock(server->clients);
 
 	for (index = 0; index < ArrayList_Count(server->clients); index++)
@@ -444,8 +484,8 @@ static int x11_shadow_pointer_alpha_update(x11ShadowSubsystem* subsystem)
 		return -1;
 	}
 
-	msg->Free = x11_shadow_message_free;
-	return shadow_client_boardcast_msg(subsystem->server, NULL, msgId,
+	msg->common.Free = x11_shadow_message_free;
+	return shadow_client_boardcast_msg(subsystem->common.server, NULL, msgId,
 	                                   (SHADOW_MSG_OUT*) msg, NULL) ? 1 : -1;
 }
 
@@ -454,7 +494,7 @@ static int x11_shadow_query_cursor(x11ShadowSubsystem* subsystem, BOOL getImage)
 	int x = 0, y = 0, n, k;
 	rdpShadowServer* server;
 	rdpShadowSurface* surface;
-	server = subsystem->server;
+	server = subsystem->common.server;
 	surface = server->surface;
 
 	if (getImage)
@@ -523,10 +563,10 @@ static int x11_shadow_query_cursor(x11ShadowSubsystem* subsystem, BOOL getImage)
 		y -= surface->y;
 	}
 
-	if ((x != subsystem->pointerX) || (y != subsystem->pointerY))
+	if ((x != (INT64)subsystem->common.pointerX) || (y != (INT64)subsystem->common.pointerY))
 	{
-		subsystem->pointerX = x;
-		subsystem->pointerY = y;
+		subsystem->common.pointerX = x;
+		subsystem->common.pointerY = y;
 		x11_shadow_pointer_position_update(subsystem);
 	}
 
@@ -591,13 +631,17 @@ static int x11_shadow_blend_cursor(x11ShadowSubsystem* subsystem)
 	BYTE* pDstData;
 	BYTE A, R, G, B;
 	rdpShadowSurface* surface;
-	surface = subsystem->server->surface;
+
+	if (!subsystem)
+		return -1;
+
+	surface = subsystem->common.server->surface;
 	nXSrc = 0;
 	nYSrc = 0;
 	nWidth = subsystem->cursorWidth;
 	nHeight = subsystem->cursorHeight;
-	nXDst = subsystem->pointerX - subsystem->cursorHotX;
-	nYDst = subsystem->pointerY - subsystem->cursorHotY;
+	nXDst = subsystem->common.pointerX - subsystem->cursorHotX;
+	nYDst = subsystem->common.pointerY - subsystem->cursorHotY;
 
 	if (nXDst >= surface->width)
 		return 1;
@@ -681,14 +725,14 @@ static BOOL x11_shadow_check_resize(x11ShadowSubsystem* subsystem)
 	XGetWindowAttributes(subsystem->display, subsystem->root_window, &attr);
 	XUnlockDisplay(subsystem->display);
 
-	if (attr.width != subsystem->width || attr.height != subsystem->height)
+	if (attr.width != (INT64)subsystem->width || attr.height != (INT64)subsystem->height)
 	{
 		/* Screen size changed. Refresh monitor definitions and trigger screen resize */
-		subsystem->numMonitors = x11_shadow_enum_monitors(subsystem->monitors, 16);
-		shadow_screen_resize(subsystem->server->screen);
+		subsystem->common.numMonitors = x11_shadow_enum_monitors(subsystem->common.monitors, 16);
+		shadow_screen_resize(subsystem->common.server->screen);
 		subsystem->width = attr.width;
 		subsystem->height = attr.height;
-		virtualScreen = &(subsystem->virtualScreen);
+		virtualScreen = &(subsystem->common.virtualScreen);
 		virtualScreen->left = 0;
 		virtualScreen->top = 0;
 		virtualScreen->right = subsystem->width;
@@ -729,7 +773,7 @@ static int x11_shadow_screen_grab(x11ShadowSubsystem* subsystem)
 	RECTANGLE_16 invalidRect;
 	RECTANGLE_16 surfaceRect;
 	const RECTANGLE_16* extents;
-	server = subsystem->server;
+	server = subsystem->common.server;
 	surface = server->surface;
 	count = ArrayList_Count(server->clients);
 
@@ -812,7 +856,7 @@ static int x11_shadow_screen_grab(x11ShadowSubsystem* subsystem)
 				client = (rdpShadowClient*) ArrayList_GetItem(server->clients, 0);
 
 				if (client)
-					subsystem->captureFrameRate = shadow_encoder_preferred_fps(client->encoder);
+					subsystem->common.captureFrameRate = shadow_encoder_preferred_fps(client->encoder);
 			}
 
 			region16_clear(&(surface->invalidRegion));
@@ -854,8 +898,9 @@ static int x11_shadow_subsystem_process_message(x11ShadowSubsystem* subsystem,
 	return 1;
 }
 
-static void* x11_shadow_subsystem_thread(x11ShadowSubsystem* subsystem)
+static DWORD WINAPI x11_shadow_subsystem_thread(LPVOID arg)
 {
+	x11ShadowSubsystem* subsystem = (x11ShadowSubsystem*)arg;
 	XEvent xevent;
 	DWORD status;
 	DWORD nCount;
@@ -866,12 +911,12 @@ static void* x11_shadow_subsystem_thread(x11ShadowSubsystem* subsystem)
 	HANDLE events[32];
 	wMessage message;
 	wMessagePipe* MsgPipe;
-	MsgPipe = subsystem->MsgPipe;
+	MsgPipe = subsystem->common.MsgPipe;
 	nCount = 0;
-	events[nCount++] = subsystem->event;
+	events[nCount++] = subsystem->common.event;
 	events[nCount++] = MessageQueue_Event(MsgPipe->In);
-	subsystem->captureFrameRate = 16;
-	dwInterval = 1000 / subsystem->captureFrameRate;
+	subsystem->common.captureFrameRate = 16;
+	dwInterval = 1000 / subsystem->common.captureFrameRate;
 	frameTime = GetTickCount64() + dwInterval;
 
 	while (1)
@@ -891,7 +936,7 @@ static void* x11_shadow_subsystem_thread(x11ShadowSubsystem* subsystem)
 			}
 		}
 
-		if (WaitForSingleObject(subsystem->event, 0) == WAIT_OBJECT_0)
+		if (WaitForSingleObject(subsystem->common.event, 0) == WAIT_OBJECT_0)
 		{
 			XLockDisplay(subsystem->display);
 
@@ -909,13 +954,13 @@ static void* x11_shadow_subsystem_thread(x11ShadowSubsystem* subsystem)
 			x11_shadow_check_resize(subsystem);
 			x11_shadow_screen_grab(subsystem);
 			x11_shadow_query_cursor(subsystem, FALSE);
-			dwInterval = 1000 / subsystem->captureFrameRate;
+			dwInterval = 1000 / subsystem->common.captureFrameRate;
 			frameTime += dwInterval;
 		}
 	}
 
 	ExitThread(0);
-	return NULL;
+	return 0;
 }
 
 static int x11_shadow_subsystem_base_init(x11ShadowSubsystem* subsystem)
@@ -1102,7 +1147,7 @@ static int x11_shadow_xshm_init(x11ShadowSubsystem* subsystem)
 	return 1;
 }
 
-int x11_shadow_enum_monitors(MONITOR_DEF* monitors, int maxMonitors)
+UINT32 x11_shadow_enum_monitors(MONITOR_DEF* monitors, UINT32 maxMonitors)
 {
 	int index;
 	Display* display;
@@ -1137,8 +1182,8 @@ int x11_shadow_enum_monitors(MONITOR_DEF* monitors, int maxMonitors)
 		{
 			screens = XineramaQueryScreens(display, &numMonitors);
 
-			if (numMonitors > maxMonitors)
-				numMonitors = maxMonitors;
+			if (numMonitors > (INT64)maxMonitors)
+				numMonitors = (int)maxMonitors;
 
 			if (screens && (numMonitors > 0))
 			{
@@ -1172,10 +1217,11 @@ int x11_shadow_enum_monitors(MONITOR_DEF* monitors, int maxMonitors)
 		monitor->flags = 1;
 	}
 
+	errno = 0;
 	return numMonitors;
 }
 
-static int x11_shadow_subsystem_init(x11ShadowSubsystem* subsystem)
+static int x11_shadow_subsystem_init(rdpShadowSubsystem* sub)
 {
 	int i;
 	int pf_count;
@@ -1188,7 +1234,12 @@ static int x11_shadow_subsystem_init(x11ShadowSubsystem* subsystem)
 	XPixmapFormatValues* pf;
 	XPixmapFormatValues* pfs;
 	MONITOR_DEF* virtualScreen;
-	subsystem->numMonitors = x11_shadow_enum_monitors(subsystem->monitors, 16);
+	x11ShadowSubsystem* subsystem = (x11ShadowSubsystem*)sub;
+
+	if (!subsystem)
+		return -1;
+
+	subsystem->common.numMonitors = x11_shadow_enum_monitors(subsystem->common.monitors, 16);
 	x11_shadow_subsystem_base_init(subsystem);
 
 	if ((subsystem->depth != 24) && (subsystem->depth != 32))
@@ -1200,7 +1251,7 @@ static int x11_shadow_subsystem_init(x11ShadowSubsystem* subsystem)
 	extensions = XListExtensions(subsystem->display, &nextensions);
 
 	if (!extensions || (nextensions < 0))
-		    return -1;
+		return -1;
 
 	for (i = 0; i < nextensions; i++)
 	{
@@ -1225,7 +1276,7 @@ static int x11_shadow_subsystem_init(x11ShadowSubsystem* subsystem)
 	{
 		pf = pfs + i;
 
-		if (pf->depth == subsystem->depth)
+		if (pf->depth == (INT64)subsystem->depth)
 		{
 			subsystem->bpp = pf->bits_per_pixel;
 			subsystem->scanline_pad = pf->scanline_pad;
@@ -1250,7 +1301,7 @@ static int x11_shadow_subsystem_init(x11ShadowSubsystem* subsystem)
 	{
 		vi = vis + i;
 
-		if (vi->depth == subsystem->depth)
+		if (vi->depth == (INT64)subsystem->depth)
 		{
 			subsystem->visual = vi->visual;
 			break;
@@ -1263,7 +1314,7 @@ static int x11_shadow_subsystem_init(x11ShadowSubsystem* subsystem)
 	subsystem->cursorMaxWidth = 256;
 	subsystem->cursorMaxHeight = 256;
 	subsystem->cursorPixels = _aligned_malloc(subsystem->cursorMaxWidth *
-	        subsystem->cursorMaxHeight * 4, 16);
+	                          subsystem->cursorMaxHeight * 4, 16);
 
 	if (!subsystem->cursorPixels)
 		return -1;
@@ -1273,32 +1324,32 @@ static int x11_shadow_subsystem_init(x11ShadowSubsystem* subsystem)
 	if (subsystem->use_xfixes)
 	{
 		if (x11_shadow_xfixes_init(subsystem) < 0)
-			    subsystem->use_xfixes = FALSE;
+			subsystem->use_xfixes = FALSE;
 	}
 
 	if (subsystem->use_xinerama)
 	{
 		if (x11_shadow_xinerama_init(subsystem) < 0)
-			    subsystem->use_xinerama = FALSE;
+			subsystem->use_xinerama = FALSE;
 	}
 
 	if (subsystem->use_xshm)
 	{
 		if (x11_shadow_xshm_init(subsystem) < 0)
-			    subsystem->use_xshm = FALSE;
+			subsystem->use_xshm = FALSE;
 	}
 
 	if (subsystem->use_xdamage)
 	{
 		if (x11_shadow_xdamage_init(subsystem) < 0)
-			    subsystem->use_xdamage = FALSE;
+			subsystem->use_xdamage = FALSE;
 	}
 
-	if (!(subsystem->event = CreateFileDescriptorEvent(NULL, FALSE, FALSE,
-	        subsystem->xfds, WINPR_FD_READ)))
+	if (!(subsystem->common.event = CreateFileDescriptorEvent(NULL, FALSE, FALSE,
+	                                subsystem->xfds, WINPR_FD_READ)))
 		return -1;
 
-	virtualScreen = &(subsystem->virtualScreen);
+	virtualScreen = &(subsystem->common.virtualScreen);
 	virtualScreen->left = 0;
 	virtualScreen->top = 0;
 	virtualScreen->right = subsystem->width;
@@ -1311,8 +1362,10 @@ static int x11_shadow_subsystem_init(x11ShadowSubsystem* subsystem)
 	return 1;
 }
 
-static int x11_shadow_subsystem_uninit(x11ShadowSubsystem* subsystem)
+static int x11_shadow_subsystem_uninit(rdpShadowSubsystem* sub)
 {
+	x11ShadowSubsystem* subsystem = (x11ShadowSubsystem*)sub;
+
 	if (!subsystem)
 		return -1;
 
@@ -1322,10 +1375,10 @@ static int x11_shadow_subsystem_uninit(x11ShadowSubsystem* subsystem)
 		subsystem->display = NULL;
 	}
 
-	if (subsystem->event)
+	if (subsystem->common.event)
 	{
-		CloseHandle(subsystem->event);
-		subsystem->event = NULL;
+		CloseHandle(subsystem->common.event);
+		subsystem->common.event = NULL;
 	}
 
 	if (subsystem->cursorPixels)
@@ -1337,13 +1390,14 @@ static int x11_shadow_subsystem_uninit(x11ShadowSubsystem* subsystem)
 	return 1;
 }
 
-static int x11_shadow_subsystem_start(x11ShadowSubsystem* subsystem)
+static int x11_shadow_subsystem_start(rdpShadowSubsystem* sub)
 {
+	x11ShadowSubsystem* subsystem = (x11ShadowSubsystem*)sub;
+
 	if (!subsystem)
 		return -1;
 
-	if (!(subsystem->thread = CreateThread(NULL, 0,
-	                                       (LPTHREAD_START_ROUTINE) x11_shadow_subsystem_thread,
+	if (!(subsystem->thread = CreateThread(NULL, 0, x11_shadow_subsystem_thread,
 	                                       (void*) subsystem, 0, NULL)))
 	{
 		WLog_ERR(TAG, "Failed to create thread");
@@ -1353,14 +1407,16 @@ static int x11_shadow_subsystem_start(x11ShadowSubsystem* subsystem)
 	return 1;
 }
 
-static int x11_shadow_subsystem_stop(x11ShadowSubsystem* subsystem)
+static int x11_shadow_subsystem_stop(rdpShadowSubsystem* sub)
 {
+	x11ShadowSubsystem* subsystem = (x11ShadowSubsystem*)sub;
+
 	if (!subsystem)
 		return -1;
 
 	if (subsystem->thread)
 	{
-		if (MessageQueue_PostQuit(subsystem->MsgPipe->In, 0))
+		if (MessageQueue_PostQuit(subsystem->common.MsgPipe->In, 0))
 			WaitForSingleObject(subsystem->thread, INFINITE);
 
 		CloseHandle(subsystem->thread);
@@ -1370,7 +1426,7 @@ static int x11_shadow_subsystem_stop(x11ShadowSubsystem* subsystem)
 	return 1;
 }
 
-static x11ShadowSubsystem* x11_shadow_subsystem_new(void)
+static rdpShadowSubsystem* x11_shadow_subsystem_new(void)
 {
 	x11ShadowSubsystem* subsystem;
 	subsystem = (x11ShadowSubsystem*) calloc(1, sizeof(x11ShadowSubsystem));
@@ -1379,26 +1435,22 @@ static x11ShadowSubsystem* x11_shadow_subsystem_new(void)
 		return NULL;
 
 #ifdef WITH_PAM
-	subsystem->Authenticate = (pfnShadowAuthenticate) x11_shadow_pam_authenticate;
+	subsystem->common.Authenticate = x11_shadow_pam_authenticate;
 #endif
-	subsystem->SynchronizeEvent = (pfnShadowSynchronizeEvent)
-	x11_shadow_input_synchronize_event;
-	subsystem->KeyboardEvent = (pfnShadowKeyboardEvent)
-	x11_shadow_input_keyboard_event;
-	subsystem->UnicodeKeyboardEvent = (pfnShadowUnicodeKeyboardEvent)
-	x11_shadow_input_unicode_keyboard_event;
-	subsystem->MouseEvent = (pfnShadowMouseEvent) x11_shadow_input_mouse_event;
-	subsystem->ExtendedMouseEvent = (pfnShadowExtendedMouseEvent)
-	x11_shadow_input_extended_mouse_event;
+	subsystem->common.SynchronizeEvent = x11_shadow_input_synchronize_event;
+	subsystem->common.KeyboardEvent = x11_shadow_input_keyboard_event;
+	subsystem->common.UnicodeKeyboardEvent = x11_shadow_input_unicode_keyboard_event;
+	subsystem->common.MouseEvent = x11_shadow_input_mouse_event;
+	subsystem->common.ExtendedMouseEvent = x11_shadow_input_extended_mouse_event;
 	subsystem->composite = FALSE;
 	subsystem->use_xshm = FALSE; /* temporarily disabled */
 	subsystem->use_xfixes = TRUE;
 	subsystem->use_xdamage = FALSE;
 	subsystem->use_xinerama = TRUE;
-	return subsystem;
+	return (rdpShadowSubsystem*)subsystem;
 }
 
-static void x11_shadow_subsystem_free(x11ShadowSubsystem* subsystem)
+static void x11_shadow_subsystem_free(rdpShadowSubsystem* subsystem)
 {
 	if (!subsystem)
 		return;
@@ -1409,12 +1461,15 @@ static void x11_shadow_subsystem_free(x11ShadowSubsystem* subsystem)
 
 FREERDP_API int X11_ShadowSubsystemEntry(RDP_SHADOW_ENTRY_POINTS* pEntryPoints)
 {
-	pEntryPoints->New = (pfnShadowSubsystemNew) x11_shadow_subsystem_new;
-	pEntryPoints->Free = (pfnShadowSubsystemFree) x11_shadow_subsystem_free;
-	pEntryPoints->Init = (pfnShadowSubsystemInit) x11_shadow_subsystem_init;
-	pEntryPoints->Uninit = (pfnShadowSubsystemInit) x11_shadow_subsystem_uninit;
-	pEntryPoints->Start = (pfnShadowSubsystemStart) x11_shadow_subsystem_start;
-	pEntryPoints->Stop = (pfnShadowSubsystemStop) x11_shadow_subsystem_stop;
-	pEntryPoints->EnumMonitors = (pfnShadowEnumMonitors) x11_shadow_enum_monitors;
+	if (!pEntryPoints)
+		return -1;
+
+	pEntryPoints->New = x11_shadow_subsystem_new;
+	pEntryPoints->Free = x11_shadow_subsystem_free;
+	pEntryPoints->Init = x11_shadow_subsystem_init;
+	pEntryPoints->Uninit = x11_shadow_subsystem_uninit;
+	pEntryPoints->Start = x11_shadow_subsystem_start;
+	pEntryPoints->Stop = x11_shadow_subsystem_stop;
+	pEntryPoints->EnumMonitors = x11_shadow_enum_monitors;
 	return 1;
 }

@@ -9,21 +9,23 @@ static HANDLE s_sync = NULL;
 static int runInstance(int argc, char* argv[], freerdp** inst)
 {
 	int rc = -1;
-	freerdp* instance = freerdp_new();
+	RDP_CLIENT_ENTRY_POINTS clientEntryPoints;
+	ZeroMemory(&clientEntryPoints, sizeof(RDP_CLIENT_ENTRY_POINTS));
+	clientEntryPoints.Size = sizeof(RDP_CLIENT_ENTRY_POINTS);
+	clientEntryPoints.Version = RDP_CLIENT_INTERFACE_VERSION;
+	clientEntryPoints.ContextSize = sizeof(rdpContext);
+	rdpContext* context = freerdp_client_context_new(&clientEntryPoints);
 
-	if (!instance)
+	if (!context)
 		goto finish;
 
 	if (inst)
-		*inst = instance;
+		*inst = context->instance;
 
-	if (!freerdp_context_new(instance))
+	if (freerdp_client_settings_parse_command_line(context->settings, argc, argv, FALSE) < 0)
 		goto finish;
 
-	if (freerdp_client_settings_parse_command_line(instance->settings, argc, argv, FALSE) < 0)
-		goto finish;
-
-	if (!freerdp_client_load_addins(instance->context->channels, instance->settings))
+	if (!freerdp_client_load_addins(context->channels, context->settings))
 		goto finish;
 
 	if (s_sync)
@@ -34,18 +36,17 @@ static int runInstance(int argc, char* argv[], freerdp** inst)
 
 	rc = 1;
 
-	if (!freerdp_connect(instance))
+	if (!freerdp_connect(context->instance))
 		goto finish;
 
 	rc = 2;
 
-	if (!freerdp_disconnect(instance))
+	if (!freerdp_disconnect(context->instance))
 		goto finish;
 
 	rc = 0;
 finish:
-	freerdp_context_free(instance);
-	freerdp_free(instance);
+	freerdp_client_context_free(context);
 	return rc;
 }
 
@@ -87,7 +88,7 @@ struct testThreadArgs
 	freerdp** arg;
 };
 
-static void* testThread(void* arg)
+static DWORD WINAPI testThread(LPVOID arg)
 {
 	char arg1[] = "/v:192.0.2.1:XXXXX";
 	char* argv[] =
@@ -106,7 +107,7 @@ static void* testThread(void* arg)
 		ExitThread(-1);
 
 	ExitThread(0);
-	return NULL;
+	return 0;
 }
 
 static int testAbort(int port)
@@ -124,7 +125,7 @@ static int testAbort(int port)
 	args.port = port;
 	args.arg = &instance;
 	start = GetTickCount();
-	thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)testThread,
+	thread = CreateThread(NULL, 0, testThread,
 	                      &args, 0, NULL);
 
 	if (!thread)
@@ -135,6 +136,7 @@ static int testAbort(int port)
 	}
 
 	WaitForSingleObject(s_sync, INFINITE);
+	Sleep(1000); /* Wait until freerdp_connect has been called */
 	freerdp_abort_connect(instance);
 	status = WaitForSingleObject(instance->context->abortEvent, 0);
 
@@ -153,8 +155,11 @@ static int testAbort(int port)
 	s_sync = NULL;
 	diff = end - start;
 
-	if (diff > 1000)
+	if (diff > 5000)
+	{
+		printf("%s required %"PRIu32"ms for the test\n", __FUNCTION__, diff);
 		return -1;
+	}
 
 	if (WAIT_OBJECT_0 != status)
 		return -1;
@@ -165,7 +170,8 @@ static int testAbort(int port)
 
 static int testSuccess(int port)
 {
-	int rc;
+	int r;
+	int rc = -2;
 	STARTUPINFOA si;
 	PROCESS_INFORMATION process;
 	char arg1[] = "/v:127.0.0.1:XXXXX";
@@ -177,106 +183,80 @@ static int testSuccess(int port)
 		"/rfx",
 		NULL
 	};
-	char* commandLine;
+	char* commandLine = NULL;
 	int commandLineLen;
 	int argc = 4;
-	char* path = TESTING_OUTPUT_DIRECTORY;
-	char* wpath = TESTING_SRC_DIRECTORY;
-	char* exe = GetCombinedPath(path, "server");
-	char* wexe = GetCombinedPath(wpath, "server");
+	char* path = NULL;
+	char* wpath = NULL;
+	char* exe = GetCombinedPath(TESTING_OUTPUT_DIRECTORY, "server");
+	char* wexe = GetCombinedPath(TESTING_SRC_DIRECTORY, "server");
 	_snprintf(arg1, 18, "/v:127.0.0.1:%d", port);
 	clientArgs[1] = arg1;
 
 	if (!exe || !wexe)
-	{
-		free(exe);
-		free(wexe);
-		return -2;
-	}
+		goto fail;
 
 	path = GetCombinedPath(exe, "Sample");
 	wpath = GetCombinedPath(wexe, "Sample");
-	free(exe);
-	free(wexe);
 
 	if (!path || !wpath)
-	{
-		free(path);
-		free(wpath);
-		return -2;
-	}
+		goto fail;
 
 	exe = GetCombinedPath(path, "sfreerdp-server");
 
 	if (!exe)
-	{
-		free(path);
-		free(wpath);
-		return -2;
-	}
+		goto fail;
 
 	printf("Sample Server: %s\n", exe);
 	printf("Workspace: %s\n", wpath);
 
 	if (!PathFileExistsA(exe))
-	{
-		free(path);
-		free(wpath);
-		free(exe);
-		return -2;
-	}
+		goto fail;
 
 	// Start sample server locally.
-	commandLineLen = strlen(exe) + strlen(" --port=XXXXX") + 1;
+	commandLineLen = strlen(exe) + strlen("--local-only --port=XXXXX") + 1;
 	commandLine = malloc(commandLineLen);
 
 	if (!commandLine)
-	{
-		free(path);
-		free(wpath);
-		free(exe);
-		return -2;
-	}
+		goto fail;
 
-	_snprintf(commandLine, commandLineLen, "%s --port=%d", exe, port);
+	_snprintf(commandLine, commandLineLen, "%s --local-only --port=%d", exe, port);
 	memset(&si, 0, sizeof(si));
 	si.cb = sizeof(si);
 
 	if (!CreateProcessA(exe, commandLine, NULL, NULL, FALSE, 0, NULL,
 	                    wpath, &si, &process))
-	{
-		free(exe);
-		free(path);
-		free(wpath);
-		return -2;
-	}
+		goto fail;
 
-	free(exe);
-	free(path);
-	free(wpath);
-	free(commandLine);
 	Sleep(1 * 1000); /* let the server start */
-	rc = runInstance(argc, clientArgs, NULL);
+	r = runInstance(argc, clientArgs, NULL);
 
 	if (!TerminateProcess(process.hProcess, 0))
-		return -2;
+		goto fail;
 
 	WaitForSingleObject(process.hProcess, INFINITE);
 	CloseHandle(process.hProcess);
 	CloseHandle(process.hThread);
-	printf("%s: returned %d!\n", __FUNCTION__, rc);
+	printf("%s: returned %d!\n", __FUNCTION__, r);
+	rc = r;
 
-	if (rc)
-		return -1;
+	if (rc == 0)
+		printf("%s: Success!\n", __FUNCTION__);
 
-	printf("%s: Success!\n", __FUNCTION__);
-	return 0;
+fail:
+	free(exe);
+	free(path);
+	free(wpath);
+	free(commandLine);
+	return rc;
 }
 
 int TestConnect(int argc, char* argv[])
 {
 	int randomPort;
 	int random;
+	WINPR_UNUSED(argc);
+	WINPR_UNUSED(argv);
 	winpr_RAND((BYTE*)&random, sizeof(random));
 	randomPort = 3389 + (random % 200);
 

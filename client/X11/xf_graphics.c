@@ -34,7 +34,6 @@
 
 #include <freerdp/codec/bitmap.h>
 #include <freerdp/codec/rfx.h>
-#include <freerdp/codec/jpeg.h>
 
 #include "xf_graphics.h"
 #include "xf_gdi.h"
@@ -123,7 +122,7 @@ static BOOL xf_Bitmap_New(rdpContext* context, rdpBitmap* bitmap)
 	{
 		XSetFunction(xfc->display, xfc->gc, GXcopy);
 
-		if (depth != xfc->depth)
+		if ((INT64)depth != xfc->depth)
 		{
 			if (!(data = _aligned_malloc(bitmap->width * bitmap->height * 4, 16)))
 				goto unlock;
@@ -149,6 +148,8 @@ static BOOL xf_Bitmap_New(rdpContext* context, rdpBitmap* bitmap)
 		if (!xbitmap->image)
 			goto unlock;
 
+		xbitmap->image->byte_order = LSBFirst;
+		xbitmap->image->bitmap_bit_order = LSBFirst;
 		XPutImage(xfc->display, xbitmap->pixmap, xfc->gc, xbitmap->image, 0, 0, 0, 0, bitmap->width,
 		          bitmap->height);
 	}
@@ -170,12 +171,21 @@ static void xf_Bitmap_Free(rdpContext* context, rdpBitmap* bitmap)
 	xf_lock_x11(xfc, FALSE);
 
 	if (xbitmap->pixmap != 0)
+	{
 		XFreePixmap(xfc->display, xbitmap->pixmap);
+		xbitmap->pixmap = 0;
+	}
 
 	if (xbitmap->image)
-		XFree(xbitmap->image);
+	{
+		xbitmap->image->data = NULL;
+		XDestroyImage(xbitmap->image);
+		xbitmap->image = NULL;
+	}
 
 	xf_unlock_x11(xfc, FALSE);
+	_aligned_free(bitmap->data);
+	free(xbitmap);
 }
 
 static BOOL xf_Bitmap_Paint(rdpContext* context, rdpBitmap* bitmap)
@@ -203,6 +213,10 @@ static BOOL xf_Bitmap_SetSurface(rdpContext* context, rdpBitmap* bitmap,
                                  BOOL primary)
 {
 	xfContext* xfc = (xfContext*) context;
+
+	if (!context || (!bitmap && !primary))
+		return FALSE;
+
 	xf_lock_x11(xfc, FALSE);
 
 	if (primary)
@@ -228,9 +242,9 @@ static BOOL xf_Pointer_New(rdpContext* context, rdpPointer* pointer)
 		return FALSE;
 
 	if (!xfc->invert)
-		CursorFormat = PIXEL_FORMAT_RGBA32;
+		CursorFormat = (!xfc->big_endian) ? PIXEL_FORMAT_RGBA32 : PIXEL_FORMAT_ABGR32;
 	else
-		CursorFormat = PIXEL_FORMAT_BGRA32;
+		CursorFormat = (!xfc->big_endian) ? PIXEL_FORMAT_BGRA32 : PIXEL_FORMAT_ARGB32;
 
 	xf_lock_x11(xfc, FALSE);
 	ZeroMemory(&ci, sizeof(ci));
@@ -392,7 +406,8 @@ static BOOL xf_Glyph_New(rdpContext* context, const rdpGlyph* glyph)
 	XInitImage(image);
 	XPutImage(xfc->display, xf_glyph->pixmap, xfc->gc_mono, image, 0, 0, 0, 0,
 	          glyph->cx, glyph->cy);
-	XFree(image);
+	image->data = NULL;
+	XDestroyImage(image);
 	xf_unlock_x11(xfc, FALSE);
 	return TRUE;
 }
@@ -410,8 +425,8 @@ static void xf_Glyph_Free(rdpContext* context, rdpGlyph* glyph)
 	free(glyph);
 }
 
-static BOOL xf_Glyph_Draw(rdpContext* context, const rdpGlyph* glyph, UINT32 x,
-                          UINT32 y, UINT32 w, UINT32 h, UINT32 sx, UINT32 sy,
+static BOOL xf_Glyph_Draw(rdpContext* context, const rdpGlyph* glyph, INT32 x,
+                          INT32 y, INT32 w, INT32 h, INT32 sx, INT32 sy,
                           BOOL fOpRedundant)
 {
 	xfGlyph* xf_glyph;
@@ -438,8 +453,8 @@ static BOOL xf_Glyph_Draw(rdpContext* context, const rdpGlyph* glyph, UINT32 x,
 	return TRUE;
 }
 
-static BOOL xf_Glyph_BeginDraw(rdpContext* context, UINT32 x, UINT32 y,
-                               UINT32 width, UINT32 height, UINT32 bgcolor,
+static BOOL xf_Glyph_BeginDraw(rdpContext* context, INT32 x, INT32 y,
+                               INT32 width, INT32 height, UINT32 bgcolor,
                                UINT32 fgcolor, BOOL fOpRedundant)
 {
 	xfContext* xfc = (xfContext*) context;
@@ -472,8 +487,8 @@ static BOOL xf_Glyph_BeginDraw(rdpContext* context, UINT32 x, UINT32 y,
 	return TRUE;
 }
 
-static BOOL xf_Glyph_EndDraw(rdpContext* context, UINT32 x, UINT32 y,
-                             UINT32 width, UINT32 height,
+static BOOL xf_Glyph_EndDraw(rdpContext* context, INT32 x, INT32 y,
+                             INT32 width, INT32 height,
                              UINT32 bgcolor, UINT32 fgcolor)
 {
 	xfContext* xfc = (xfContext*) context;

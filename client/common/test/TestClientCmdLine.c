@@ -3,105 +3,289 @@
 #include <freerdp/settings.h>
 #include <winpr/cmdline.h>
 #include <winpr/spec.h>
+#include <winpr/strlst.h>
+#include <winpr/collections.h>
 
-#define TESTCASE(cmd, expected_return) \
-{ \
-	rdpSettings* settings = freerdp_settings_new(0); \
-	status = freerdp_client_settings_parse_command_line(settings, ARRAYSIZE(cmd), cmd, FALSE); \
-	freerdp_settings_free(settings); \
-	if (status != expected_return) { \
-		printf("Test argument %s failed\n", #cmd); \
-		return -1; \
-	} \
+
+typedef BOOL (*validate_settings_pr)(rdpSettings* settings);
+
+#define printref() printf("%s:%d: in function %-40s:", __FILE__, __LINE__, __FUNCTION__)
+
+#define ERROR(format, ...)                                              \
+	do{                                                             \
+		fprintf(stderr, format, ##__VA_ARGS__);                 \
+		printref();                                             \
+		printf(format, ##__VA_ARGS__);                          \
+		fflush(stdout);                                         \
+	}while(0)
+
+#define FAILURE(format, ...)                                            \
+	do{                                                             \
+		printref();                                             \
+		printf(" FAILURE ");                                    \
+		printf(format, ##__VA_ARGS__);                          \
+		fflush(stdout);                                         \
+	}while(0)
+
+
+static void print_test_title(int argc, char** argv)
+{
+	int i;
+	printf("Running test:");
+
+	for (i = 0; i < argc; i ++)
+	{
+		printf(" %s", argv[i]);
+	}
+
+	printf("\n");
 }
 
-#define TESTCASE_SUCCESS(cmd) \
-{ \
-	rdpSettings* settings = freerdp_settings_new(0); \
-	status = freerdp_client_settings_parse_command_line(settings, ARRAYSIZE(cmd), cmd, FALSE); \
-	freerdp_settings_free(settings); \
-	if (status < 0) { \
-		printf("Test argument %s failed\n", #cmd); \
-		return -1; \
-	} \
+static INLINE BOOL testcase(const char* name, char** argv, size_t argc,
+                            int expected_return, validate_settings_pr validate_settings)
+{
+	int status;
+	BOOL valid_settings = TRUE;
+	rdpSettings* settings = freerdp_settings_new(0);
+	print_test_title(argc, argv);
+
+	if (!settings)
+	{
+		ERROR("Test %s could not allocate settings!\n", name);
+		return FALSE;
+	}
+
+	status = freerdp_client_settings_parse_command_line(settings, argc, argv, FALSE);
+
+	if (validate_settings)
+	{
+		valid_settings = validate_settings(settings);
+	}
+
+	freerdp_settings_free(settings);
+
+	if (status == expected_return)
+	{
+		if (!valid_settings)
+		{
+			return FALSE;
+		}
+	}
+	else
+	{
+		FAILURE("Expected status %d,  got status %d\n", expected_return, status);
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+#if defined(_WIN32)
+#define DRIVE_REDIRECT_PATH "c:\\Windows"
+#else
+#define DRIVE_REDIRECT_PATH "/tmp"
+#endif
+
+static BOOL check_settings_smartcard_no_redirection(rdpSettings* settings)
+{
+	BOOL result = TRUE;
+
+	if (settings->RedirectSmartCards)
+	{
+		FAILURE("Expected RedirectSmartCards = FALSE,  but RedirectSmartCards = TRUE!\n");
+		result = FALSE;
+	}
+
+	if (freerdp_device_collection_find_type(settings, RDPDR_DTYP_SMARTCARD))
+	{
+		FAILURE("Expected no SMARTCARD device, but found at least one!\n");
+		result = FALSE;
+	}
+
+	return result;
+}
+
+typedef struct
+{
+	int expected_status;
+	validate_settings_pr validate_settings;
+	const char* command_line[128];
+	struct
+	{
+		int index;
+		const char*   expected_value;
+	} modified_arguments[8];
+} test;
+
+static test tests[] =
+{
+	{
+		COMMAND_LINE_STATUS_PRINT_HELP, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "--help", 0},
+		{{0}}
+	},
+	{
+		COMMAND_LINE_STATUS_PRINT_HELP, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "/help", 0},
+		{{0}}
+	},
+	{
+		COMMAND_LINE_STATUS_PRINT_HELP, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "-help", 0},
+		{{0}}
+	},
+	{
+		COMMAND_LINE_STATUS_PRINT_VERSION, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "--version", 0},
+		{{0}}
+	},
+	{
+		COMMAND_LINE_STATUS_PRINT_VERSION, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "/version", 0},
+		{{0}}
+	},
+	{
+		COMMAND_LINE_STATUS_PRINT_VERSION, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "-version", 0},
+		{{0}}
+	},
+	{
+		0, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "test.freerdp.com", 0},
+		{{0}}
+	},
+	{
+		0, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "-v", "test.freerdp.com", 0},
+		{{0}}
+	},
+	{
+		0, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "--v", "test.freerdp.com", 0},
+		{{0}}
+	},
+	{
+		0, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "/v:test.freerdp.com", 0},
+		{{0}}
+	},
+	{
+		0, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "--plugin", "rdpsnd", "--plugin", "rdpdr", "--data", "disk:media:"DRIVE_REDIRECT_PATH, "--", "test.freerdp.com", 0},
+		{{0}}
+	},
+	{
+		0, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "/sound", "/drive:media,"DRIVE_REDIRECT_PATH, "/v:test.freerdp.com", 0},
+		{{0}}
+	},
+	{
+		0, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "-u", "test", "-p", "test", "test.freerdp.com", 0},
+		{{4, "****"}, {0}}
+	},
+	{
+		0, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "-u", "test", "-p", "test", "-v", "test.freerdp.com", 0},
+		{{4, "****"}, {0}}
+	},
+	{
+		0, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "/u:test", "/p:test", "/v:test.freerdp.com", 0},
+		{{2, "/p:****"}, {0}}
+	},
+	{
+		COMMAND_LINE_ERROR_NO_KEYWORD, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "-invalid", 0},
+		{{0}}
+	},
+	{
+		COMMAND_LINE_ERROR_NO_KEYWORD, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "--invalid", 0},
+		{{0}}
+	},
+	{
+		COMMAND_LINE_STATUS_PRINT, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "/kbd-list", 0},
+		{{0}}
+	},
+	{
+		COMMAND_LINE_STATUS_PRINT, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "/monitor-list", 0},
+		{{0}}
+	},
+	{
+		COMMAND_LINE_ERROR, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "/sound", "/drive:media:"DRIVE_REDIRECT_PATH, "/v:test.freerdp.com", 0},
+		{{0}}
+	},
+	{
+		COMMAND_LINE_ERROR, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "/sound", "/drive:media,/foo/bar/blabla", "/v:test.freerdp.com", 0},
+		{{0}}
+	},
+
+#if 0
+	{
+		COMMAND_LINE_STATUS_PRINT, check_settings_smartcard_no_redirection,
+		{"testfreerdp", "-z", "--plugin", "cliprdr", "--plugin", "rdpsnd", "--data", "alsa", "latency:100", "--", "--plugin", "rdpdr", "--data", "disk:w7share:/home/w7share", "--", "--plugin", "drdynvc", "--data", "tsmf:decoder:gstreamer", "--", "-u", "test", "host.example.com", 0},
+		{{0}}
+	},
+#endif
+};
+
+
+void check_modified_arguments(test* test, char** command_line, int* rc)
+{
+	int k;
+	const char*   expected_argument;
+
+	for (k = 0; (expected_argument = test->modified_arguments[k].expected_value); k ++)
+	{
+		int index = test->modified_arguments[k].index;
+		char* actual_argument = command_line[index];
+
+		if (0 != strcmp(actual_argument, expected_argument))
+		{
+			printref();
+			printf("Failure: overridden argument %d is %s but it should be %s\n",
+			       index, actual_argument, expected_argument);
+			fflush(stdout);
+			* rc = -1;
+		}
+	}
 }
 
 int TestClientCmdLine(int argc, char* argv[])
 {
-	int status;
-	char* cmd1[] = {"xfreerdp", "--help"};
-	char* cmd2[] = {"xfreerdp", "/help"};
-	char* cmd3[] = {"xfreerdp", "-help"};
-	char* cmd4[] = {"xfreerdp", "--version"};
-	char* cmd5[] = {"xfreerdp", "/version"};
-	char* cmd6[] = {"xfreerdp", "-version"};
-	char* cmd7[] = {"xfreerdp", "test.freerdp.com"};
-	char* cmd8[] = {"xfreerdp", "-v", "test.freerdp.com"};
-	char* cmd9[] = {"xfreerdp", "--v", "test.freerdp.com"};
-	char* cmd10[] = {"xfreerdp", "/v:test.freerdp.com"};
-	char* cmd11[] = {"xfreerdp", "--plugin", "rdpsnd", "--plugin", "rdpdr", "--data", "disk:media:/tmp", "--", "test.freerdp.com" };
-	char* cmd12[] = {"xfreerdp", "/sound", "/drive:media:/tmp", "/v:test.freerdp.com" };
-	char* cmd13[] = {"xfreerdp", "-u", "test", "-p", "test", "test.freerdp.com"};
-	char* cmd14[] = {"xfreerdp", "-u", "test", "-p", "test", "-v", "test.freerdp.com"};
-	char* cmd15[] = {"xfreerdp", "/u:test", "/p:test", "/v:test.freerdp.com"};
-	char* cmd16[] = {"xfreerdp", "-invalid"};
-	char* cmd17[] = {"xfreerdp", "--invalid"};
-	char* cmd18[] = {"xfreerdp", "/kbd-list"};
-	char* cmd19[] = {"xfreerdp", "/monitor-list"};
+	int rc = 0;
+	size_t i;
 
-	TESTCASE(cmd1, COMMAND_LINE_STATUS_PRINT_HELP);
+	WINPR_UNUSED(argc);
+	WINPR_UNUSED(argv);
+	for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i ++)
+	{
+		int failure = 0;
+		char** command_line = string_list_copy(tests[i].command_line);
 
-	TESTCASE(cmd2, COMMAND_LINE_STATUS_PRINT_HELP);
+		if (!testcase(__FUNCTION__,
+		              command_line, string_list_length((const char * const*)command_line),
+		              tests[i].expected_status, tests[i].validate_settings))
+		{
+			FAILURE("parsing arguments.\n");
+			failure = 1;
+		}
 
-	TESTCASE(cmd3, COMMAND_LINE_STATUS_PRINT_HELP);
+		check_modified_arguments(& tests[i], command_line, & failure);
 
-	TESTCASE(cmd4, COMMAND_LINE_STATUS_PRINT_VERSION);
+		if (failure)
+		{
+			string_list_print(stdout, (const char * const*)command_line);
+			rc = -1;
+		}
 
-	TESTCASE(cmd5, COMMAND_LINE_STATUS_PRINT_VERSION);
+		string_list_free(command_line);
+	}
 
-	TESTCASE(cmd6, COMMAND_LINE_STATUS_PRINT_VERSION);
-
-	TESTCASE_SUCCESS(cmd7);
-
-	TESTCASE_SUCCESS(cmd8);
-
-	TESTCASE_SUCCESS(cmd9);
-
-	TESTCASE_SUCCESS(cmd10);
-
-	TESTCASE_SUCCESS(cmd11);
-
-	TESTCASE_SUCCESS(cmd12);
-
-	// password gets overwritten therefore it need to be writeable
-	cmd13[4] = calloc(5, sizeof(char));
-	strncpy(cmd13[4], "test", 4);
-	TESTCASE_SUCCESS(cmd13);
-	free(cmd13[4]);
-
-	cmd14[4] = calloc(5, sizeof(char));
-	strncpy(cmd14[4], "test", 4);
-	TESTCASE_SUCCESS(cmd14);
-	free(cmd14[4]);
-
-	cmd15[2] = calloc(7, sizeof(char));
-	strncpy(cmd15[2], "/p:test", 6);
-	TESTCASE_SUCCESS(cmd15);
-	free(cmd15[2]);
-
-	TESTCASE(cmd16, COMMAND_LINE_ERROR_NO_KEYWORD);
-
-	TESTCASE(cmd17, COMMAND_LINE_ERROR_NO_KEYWORD);
-
-	TESTCASE(cmd18, COMMAND_LINE_STATUS_PRINT);
-
-	TESTCASE(cmd19, COMMAND_LINE_STATUS_PRINT);
-
-#if 0
-	char* cmd20[] = {"-z --plugin cliprdr --plugin rdpsnd --data alsa latency:100 -- --plugin rdpdr --data disk:w7share:/home/w7share -- --plugin drdynvc --data tsmf:decoder:gstreamer -- -u test host.example.com"};
-	TESTCASE(cmd20, COMMAND_LINE_STATUS_PRINT);
-#endif
-
-	return 0;
+	return rc;
 }
-

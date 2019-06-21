@@ -70,7 +70,7 @@ typedef struct _audin_server
  * @return 0 on success, otherwise a Win32 error code
  */
 static UINT audin_server_select_format(audin_server_context* context,
-                                       int client_format_index)
+                                       size_t client_format_index)
 {
 	audin_server* audin = (audin_server*) context;
 
@@ -81,7 +81,14 @@ static UINT audin_server_select_format(audin_server_context* context,
 		return ERROR_INVALID_DATA;
 	}
 
-	context->selected_client_format = client_format_index;
+	context->selected_client_format = (SSIZE_T)client_format_index;
+
+	if (!freerdp_dsp_context_reset(audin->dsp_context,
+	                               &audin->context.client_formats[client_format_index]))
+	{
+		WLog_ERR(TAG, "Failed to reset dsp context format!");
+		return ERROR_INTERNAL_ERROR;
+	}
 
 	if (audin->opened)
 	{
@@ -147,8 +154,7 @@ static UINT audin_server_recv_version(audin_server* audin, wStream* s,
  */
 static UINT audin_server_send_formats(audin_server* audin, wStream* s)
 {
-	int i;
-	UINT32 nAvgBytesPerSec;
+	size_t i;
 	ULONG written;
 	Stream_SetPosition(s, 0);
 	Stream_Write_UINT8(s, MSG_SNDIN_FORMATS);
@@ -159,34 +165,14 @@ static UINT audin_server_send_formats(audin_server* audin, wStream* s)
 
 	for (i = 0; i < audin->context.num_server_formats; i++)
 	{
-		nAvgBytesPerSec = audin->context.server_formats[i].nSamplesPerSec *
-		                  audin->context.server_formats[i].nChannels *
-		                  audin->context.server_formats[i].wBitsPerSample / 8;
+		AUDIO_FORMAT format = audin->context.server_formats[i];
+		// TODO: Eliminate this
+		format.nAvgBytesPerSec = format.nSamplesPerSec * format.nChannels * format.wBitsPerSample / 8;
 
-		if (!Stream_EnsureRemainingCapacity(s, 18))
+		if (!audio_format_write(s, &format))
 		{
 			WLog_ERR(TAG, "Stream_EnsureRemainingCapacity failed!");
 			return CHANNEL_RC_NO_MEMORY;
-		}
-
-		Stream_Write_UINT16(s, audin->context.server_formats[i].wFormatTag);
-		Stream_Write_UINT16(s, audin->context.server_formats[i].nChannels);
-		Stream_Write_UINT32(s, audin->context.server_formats[i].nSamplesPerSec);
-		Stream_Write_UINT32(s, nAvgBytesPerSec);
-		Stream_Write_UINT16(s, audin->context.server_formats[i].nBlockAlign);
-		Stream_Write_UINT16(s, audin->context.server_formats[i].wBitsPerSample);
-		Stream_Write_UINT16(s, audin->context.server_formats[i].cbSize);
-
-		if (audin->context.server_formats[i].cbSize)
-		{
-			if (!Stream_EnsureRemainingCapacity(s, audin->context.server_formats[i].cbSize))
-			{
-				WLog_ERR(TAG, "Stream_EnsureRemainingCapacity failed!");
-				return CHANNEL_RC_NO_MEMORY;
-			}
-
-			Stream_Write(s, audin->context.server_formats[i].data,
-			             audin->context.server_formats[i].cbSize);
 		}
 	}
 
@@ -202,7 +188,7 @@ static UINT audin_server_send_formats(audin_server* audin, wStream* s)
 static UINT audin_server_recv_formats(audin_server* audin, wStream* s,
                                       UINT32 length)
 {
-	int i;
+	size_t i;
 	UINT success = CHANNEL_RC_OK;
 
 	if (length < 8)
@@ -224,34 +210,24 @@ static UINT audin_server_recv_formats(audin_server* audin, wStream* s,
 		return ERROR_INVALID_DATA;
 	}
 
-	audin->context.client_formats = calloc(audin->context.num_client_formats,
-	                                       sizeof(AUDIO_FORMAT));
+	audin->context.client_formats = audio_formats_new(audin->context.num_client_formats);
 
 	if (!audin->context.client_formats)
 		return ERROR_NOT_ENOUGH_MEMORY;
 
 	for (i = 0; i < audin->context.num_client_formats; i++)
 	{
-		if (length < 18)
+		AUDIO_FORMAT* format = &audin->context.client_formats[i];
+
+		if (!audio_format_read(s, format))
 		{
-			free(audin->context.client_formats);
+			audio_formats_free(audin->context.client_formats, i);
 			audin->context.client_formats = NULL;
 			WLog_ERR(TAG, "expected length at least 18, but got %"PRIu32"", length);
 			return ERROR_INVALID_DATA;
 		}
 
-		Stream_Read_UINT16(s, audin->context.client_formats[i].wFormatTag);
-		Stream_Read_UINT16(s, audin->context.client_formats[i].nChannels);
-		Stream_Read_UINT32(s, audin->context.client_formats[i].nSamplesPerSec);
-		Stream_Seek_UINT32(s); /* nAvgBytesPerSec */
-		Stream_Read_UINT16(s, audin->context.client_formats[i].nBlockAlign);
-		Stream_Read_UINT16(s, audin->context.client_formats[i].wBitsPerSample);
-		Stream_Read_UINT16(s, audin->context.client_formats[i].cbSize);
-
-		if (audin->context.client_formats[i].cbSize > 0)
-		{
-			Stream_Seek(s, audin->context.client_formats[i].cbSize);
-		}
+		audio_format_print(WLog_Get(TAG), WLOG_DEBUG, format);
 	}
 
 	IFCALLRET(audin->context.Opening, success, &audin->context);
@@ -339,10 +315,9 @@ static UINT audin_server_recv_data(audin_server* audin, wStream* s,
 	AUDIO_FORMAT* format;
 	int sbytes_per_sample;
 	int sbytes_per_frame;
-	BYTE* src;
-	int size;
 	int frames;
-	UINT success = CHANNEL_RC_OK;
+	wStream* out;
+	UINT success = ERROR_INTERNAL_ERROR;
 
 	if (audin->context.selected_client_format < 0)
 	{
@@ -351,57 +326,36 @@ static UINT audin_server_recv_data(audin_server* audin, wStream* s,
 		return ERROR_INVALID_DATA;
 	}
 
+	out = Stream_New(NULL, 4096);
+
+	if (!out)
+		return ERROR_OUTOFMEMORY;
+
 	format = &audin->context.client_formats[audin->context.selected_client_format];
 
-	if (format->wFormatTag == WAVE_FORMAT_ADPCM)
+	if (freerdp_dsp_decode(audin->dsp_context, format, Stream_Pointer(s), length, out))
 	{
-		audin->dsp_context->decode_ms_adpcm(audin->dsp_context,
-		                                    Stream_Pointer(s), length, format->nChannels, format->nBlockAlign);
-		size = audin->dsp_context->adpcm_size;
-		src = audin->dsp_context->adpcm_buffer;
-		sbytes_per_sample = 2;
-		sbytes_per_frame = format->nChannels * 2;
-	}
-	else if (format->wFormatTag == WAVE_FORMAT_DVI_ADPCM)
-	{
-		audin->dsp_context->decode_ima_adpcm(audin->dsp_context,
-		                                     Stream_Pointer(s), length, format->nChannels, format->nBlockAlign);
-		size = audin->dsp_context->adpcm_size;
-		src = audin->dsp_context->adpcm_buffer;
-		sbytes_per_sample = 2;
-		sbytes_per_frame = format->nChannels * 2;
-	}
-	else
-	{
-		size = length;
-		src = Stream_Pointer(s);
+		AUDIO_FORMAT dformat = *format;
+		dformat.wFormatTag = WAVE_FORMAT_PCM;
+		dformat.wBitsPerSample = 16;
+		Stream_SealLength(out);
+		Stream_SetPosition(out, 0);
 		sbytes_per_sample = format->wBitsPerSample / 8;
 		sbytes_per_frame = format->nChannels * sbytes_per_sample;
-	}
+		frames = Stream_Length(out) / sbytes_per_frame;
+		IFCALLRET(audin->context.ReceiveSamples, success, &audin->context, &dformat, out, frames);
 
-	if (format->nSamplesPerSec == audin->context.dst_format.nSamplesPerSec
-	    && format->nChannels == audin->context.dst_format.nChannels)
-	{
-		frames = size / sbytes_per_frame;
+		if (success)
+			WLog_ERR(TAG, "context.ReceiveSamples failed with error %"PRIu32"", success);
 	}
 	else
-	{
-		audin->dsp_context->resample(audin->dsp_context, src, sbytes_per_sample,
-		                             format->nChannels, format->nSamplesPerSec, size / sbytes_per_frame,
-		                             audin->context.dst_format.nChannels, audin->context.dst_format.nSamplesPerSec);
-		frames = audin->dsp_context->resampled_frames;
-		src = audin->dsp_context->resampled_buffer;
-	}
+		WLog_ERR(TAG, "freerdp_dsp_decode failed!");
 
-	IFCALLRET(audin->context.ReceiveSamples, success, &audin->context, src, frames);
-
-	if (success)
-		WLog_ERR(TAG, "context.ReceiveSamples failed with error %"PRIu32"", success);
-
+	Stream_Free(out, TRUE);
 	return success;
 }
 
-static void* audin_server_thread_func(void* arg)
+static DWORD WINAPI audin_server_thread_func(LPVOID arg)
 {
 	wStream* s;
 	void* buffer;
@@ -596,8 +550,8 @@ out:
 		setChannelError(audin->context.rdpcontext, error,
 		                "audin_server_thread_func reported an error");
 
-	ExitThread((DWORD)error);
-	return NULL;
+	ExitThread(error);
+	return error;
 }
 
 static BOOL audin_server_open(audin_server_context* context)
@@ -632,8 +586,7 @@ static BOOL audin_server_open(audin_server_context* context)
 			return FALSE;
 		}
 
-		if (!(audin->thread = CreateThread(NULL, 0,
-		                                   (LPTHREAD_START_ROUTINE) audin_server_thread_func, (void*) audin, 0, NULL)))
+		if (!(audin->thread = CreateThread(NULL, 0, audin_server_thread_func, (void*) audin, 0, NULL)))
 		{
 			WLog_ERR(TAG, "CreateThread failed!");
 			CloseHandle(audin->stopEvent);
@@ -646,6 +599,16 @@ static BOOL audin_server_open(audin_server_context* context)
 
 	WLog_ERR(TAG, "thread already running!");
 	return FALSE;
+}
+
+static BOOL audin_server_is_open(audin_server_context* context)
+{
+	audin_server* audin = (audin_server*) context;
+
+	if (!audin)
+		return FALSE;
+
+	return audin->thread != NULL;
 }
 
 static BOOL audin_server_close(audin_server_context* context)
@@ -694,8 +657,9 @@ audin_server_context* audin_server_context_new(HANDLE vcm)
 	audin->context.frames_per_packet = 4096;
 	audin->context.SelectFormat = audin_server_select_format;
 	audin->context.Open = audin_server_open;
+	audin->context.IsOpen = audin_server_is_open;
 	audin->context.Close = audin_server_close;
-	audin->dsp_context = freerdp_dsp_context_new();
+	audin->dsp_context = freerdp_dsp_context_new(FALSE);
 
 	if (!audin->dsp_context)
 	{
@@ -710,11 +674,13 @@ audin_server_context* audin_server_context_new(HANDLE vcm)
 void audin_server_context_free(audin_server_context* context)
 {
 	audin_server* audin = (audin_server*) context;
+
+	if (!audin)
+		return;
+
 	audin_server_close(context);
-
-	if (audin->dsp_context)
-		freerdp_dsp_context_free(audin->dsp_context);
-
-	free(audin->context.client_formats);
+	freerdp_dsp_context_free(audin->dsp_context);
+	audio_formats_free(audin->context.client_formats, audin->context.num_client_formats);
+	audio_formats_free(audin->context.server_formats, audin->context.num_server_formats);
 	free(audin);
 }

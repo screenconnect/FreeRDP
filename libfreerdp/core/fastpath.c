@@ -41,6 +41,10 @@
 #include "fastpath.h"
 #include "rdp.h"
 
+#include "../cache/pointer.h"
+#include "../cache/palette.h"
+#include "../cache/bitmap.h"
+
 #define TAG FREERDP_TAG("core.fastpath")
 
 /**
@@ -53,8 +57,6 @@
  * two less significant bits of the first byte.
  */
 
-
-#ifdef WITH_DEBUG_RDP
 static const char* const FASTPATH_UPDATETYPE_STRINGS[] =
 {
 	"Orders",									/* 0x0 */
@@ -70,7 +72,14 @@ static const char* const FASTPATH_UPDATETYPE_STRINGS[] =
 	"Cached Pointer",					/* 0xA */
 	"New Pointer",						/* 0xB */
 };
-#endif
+
+static const char* fastpath_update_to_string(UINT8 update)
+{
+	if (update >= ARRAYSIZE(FASTPATH_UPDATETYPE_STRINGS))
+		return "UNKNOWN";
+
+	return FASTPATH_UPDATETYPE_STRINGS[update];
+}
 
 /*
  * The fastpath header may be two or three bytes long.
@@ -256,15 +265,24 @@ static BOOL fastpath_recv_orders(rdpFastPath* fastpath, wStream* s)
 	UINT16 numberOrders;
 
 	if (!fastpath || !fastpath->rdp || !s)
+	{
+		WLog_ERR(TAG, "Invalid arguments");
 		return FALSE;
+	}
 
 	update = fastpath->rdp->update;
 
 	if (!update)
+	{
+		WLog_ERR(TAG, "Invalid configuration");
 		return FALSE;
+	}
 
 	if (Stream_GetRemainingLength(s) < 2)
+	{
+		WLog_ERR(TAG, "Stream short");
 		return FALSE;
+	}
 
 	Stream_Read_UINT16(s, numberOrders); /* numberOrders (2 bytes) */
 
@@ -281,6 +299,7 @@ static BOOL fastpath_recv_orders(rdpFastPath* fastpath, wStream* s)
 
 static BOOL fastpath_recv_update_common(rdpFastPath* fastpath, wStream* s)
 {
+	BOOL rc = FALSE;
 	UINT16 updateType;
 	rdpUpdate* update;
 	rdpContext* context;
@@ -303,21 +322,34 @@ static BOOL fastpath_recv_update_common(rdpFastPath* fastpath, wStream* s)
 	switch (updateType)
 	{
 		case UPDATE_TYPE_BITMAP:
-			if (!update_read_bitmap_update(update, s, &update->bitmap_update))
-				return FALSE;
+			{
+				BITMAP_UPDATE* bitmap_update = update_read_bitmap_update(update, s);
 
-			IFCALL(update->BitmapUpdate, context, &update->bitmap_update);
+				if (!bitmap_update)
+					return FALSE;
+
+				rc = IFCALLRESULT(FALSE, update->BitmapUpdate, context, bitmap_update);
+				free_bitmap_update(context, bitmap_update);
+			}
 			break;
 
 		case UPDATE_TYPE_PALETTE:
-			if (!update_read_palette(update, s, &update->palette_update))
-				return FALSE;
+			{
+				PALETTE_UPDATE* palette_update = update_read_palette(update, s);
 
-			IFCALL(update->Palette, context, &update->palette_update);
+				if (!palette_update)
+					return FALSE;
+
+				rc = IFCALLRESULT(FALSE, update->Palette, context, palette_update);
+				free_palette_update(context, palette_update);
+			}
+			break;
+
+		default:
 			break;
 	}
 
-	return TRUE;
+	return rc;
 }
 
 static BOOL fastpath_recv_update_synchronize(rdpFastPath* fastpath, wStream* s)
@@ -328,8 +360,9 @@ static BOOL fastpath_recv_update_synchronize(rdpFastPath* fastpath, wStream* s)
 	return TRUE;
 }
 
-static int fastpath_recv_update(rdpFastPath* fastpath, BYTE updateCode, UINT32 size, wStream* s)
+static int fastpath_recv_update(rdpFastPath* fastpath, BYTE updateCode, wStream* s)
 {
+	BOOL rc = FALSE;
 	int status = 0;
 	rdpUpdate* update;
 	rdpContext* context;
@@ -346,101 +379,107 @@ static int fastpath_recv_update(rdpFastPath* fastpath, BYTE updateCode, UINT32 s
 	context = update->context;
 	pointer = update->pointer;
 #ifdef WITH_DEBUG_RDP
-	DEBUG_RDP("recv Fast-Path %s Update (0x%02"PRIX8"), length:%"PRIu32"",
-	          updateCode < ARRAYSIZE(FASTPATH_UPDATETYPE_STRINGS) ? FASTPATH_UPDATETYPE_STRINGS[updateCode] :
-	          "???", updateCode, size);
+	DEBUG_RDP("recv Fast-Path %s Update (0x%02"PRIX8"), length:%"PRIuz"",
+	          fastpath_update_to_string(updateCode), updateCode, Stream_GetRemainingLength(s));
 #endif
 
 	switch (updateCode)
 	{
 		case FASTPATH_UPDATETYPE_ORDERS:
-			if (!fastpath_recv_orders(fastpath, s))
-			{
-				WLog_ERR(TAG, "FASTPATH_UPDATETYPE_ORDERS - fastpath_recv_orders()");
-				return -1;
-			}
-
+			rc = fastpath_recv_orders(fastpath, s);
 			break;
 
 		case FASTPATH_UPDATETYPE_BITMAP:
 		case FASTPATH_UPDATETYPE_PALETTE:
-			if (!fastpath_recv_update_common(fastpath, s))
-			{
-				WLog_ERR(TAG, "FASTPATH_UPDATETYPE_ORDERS - fastpath_recv_update_common()");
-				return -1;
-			}
-
+			rc = fastpath_recv_update_common(fastpath, s);
 			break;
 
 		case FASTPATH_UPDATETYPE_SYNCHRONIZE:
 			if (!fastpath_recv_update_synchronize(fastpath, s))
 				WLog_ERR(TAG,  "fastpath_recv_update_synchronize failure but we continue");
 			else
-				IFCALL(update->Synchronize, context);
+				rc = IFCALLRESULT(TRUE, update->Synchronize, context);
 
 			break;
 
 		case FASTPATH_UPDATETYPE_SURFCMDS:
-			status = update_recv_surfcmds(update, size, s);
-
-			if (status < 0)
-				WLog_ERR(TAG, "FASTPATH_UPDATETYPE_SURFCMDS - update_recv_surfcmds() - %i", status);
-
+			status = update_recv_surfcmds(update, s);
+			rc = (status < 0) ? FALSE : TRUE;
 			break;
 
 		case FASTPATH_UPDATETYPE_PTR_NULL:
-			pointer->pointer_system.type = SYSPTR_NULL;
-			IFCALL(pointer->PointerSystem, context, &pointer->pointer_system);
+			{
+				POINTER_SYSTEM_UPDATE pointer_system;
+				pointer_system.type = SYSPTR_NULL;
+				rc = IFCALLRESULT(FALSE, pointer->PointerSystem, context, &pointer_system);
+			}
 			break;
 
 		case FASTPATH_UPDATETYPE_PTR_DEFAULT:
-			update->pointer->pointer_system.type = SYSPTR_DEFAULT;
-			IFCALL(pointer->PointerSystem, context, &pointer->pointer_system);
+			{
+				POINTER_SYSTEM_UPDATE pointer_system;
+				pointer_system.type = SYSPTR_DEFAULT;
+				rc = IFCALLRESULT(FALSE, pointer->PointerSystem, context, &pointer_system);
+			}
 			break;
 
 		case FASTPATH_UPDATETYPE_PTR_POSITION:
-			if (!update_read_pointer_position(s, &pointer->pointer_position))
 			{
-				WLog_ERR(TAG, "FASTPATH_UPDATETYPE_PTR_POSITION - update_read_pointer_position()");
-				return -1;
-			}
+				POINTER_POSITION_UPDATE* pointer_position = update_read_pointer_position(update, s);
 
-			IFCALL(pointer->PointerPosition, context, &pointer->pointer_position);
+				if (pointer_position)
+				{
+					rc = IFCALLRESULT(FALSE, pointer->PointerPosition, context, pointer_position);
+					free_pointer_position_update(context, pointer_position);
+				}
+			}
 			break;
 
 		case FASTPATH_UPDATETYPE_COLOR:
-			if (!update_read_pointer_color(s, &pointer->pointer_color, 24))
 			{
-				WLog_ERR(TAG, "FASTPATH_UPDATETYPE_COLOR - update_read_pointer_color()");
-				return -1;
-			}
+				POINTER_COLOR_UPDATE* pointer_color = update_read_pointer_color(update, s, 24);
 
-			IFCALL(pointer->PointerColor, context, &pointer->pointer_color);
+				if (pointer_color)
+				{
+					rc = IFCALLRESULT(FALSE, pointer->PointerColor, context, pointer_color);
+					free_pointer_color_update(context, pointer_color);
+				}
+			}
 			break;
 
 		case FASTPATH_UPDATETYPE_CACHED:
-			if (!update_read_pointer_cached(s, &pointer->pointer_cached))
 			{
-				WLog_ERR(TAG, "FASTPATH_UPDATETYPE_CACHED - update_read_pointer_cached()");
-				return -1;
-			}
+				POINTER_CACHED_UPDATE* pointer_cached = update_read_pointer_cached(update, s);
 
-			IFCALL(pointer->PointerCached, context, &pointer->pointer_cached);
+				if (pointer_cached)
+				{
+					rc = IFCALLRESULT(FALSE, pointer->PointerCached, context, pointer_cached);
+					free_pointer_cached_update(context, pointer_cached);
+				}
+			}
 			break;
 
 		case FASTPATH_UPDATETYPE_POINTER:
-			if (!update_read_pointer_new(s, &pointer->pointer_new))
 			{
-				WLog_ERR(TAG, "FASTPATH_UPDATETYPE_POINTER - update_read_pointer_new()");
-				return -1;
-			}
+				POINTER_NEW_UPDATE* pointer_new = update_read_pointer_new(update, s);
 
-			IFCALL(pointer->PointerNew, context, &pointer->pointer_new);
+				if (pointer_new)
+				{
+					rc = IFCALLRESULT(FALSE, pointer->PointerNew, context, pointer_new);
+					free_pointer_new_update(context, pointer_new);
+				}
+			}
 			break;
 
 		default:
-			WLog_ERR(TAG, "unknown updateCode 0x%02"PRIX8"", updateCode);
 			break;
+	}
+
+	if (!rc)
+	{
+		WLog_ERR(TAG, "Fastpath update %s [%"PRIx8"] failed, status %d",
+		         fastpath_update_to_string(updateCode), updateCode, status);
+		return -1;
 	}
 
 	return status;
@@ -451,10 +490,7 @@ static int fastpath_recv_update_data(rdpFastPath* fastpath, wStream* s)
 	int status;
 	UINT16 size;
 	rdpRdp* rdp;
-	int next_pos;
-	wStream* cs;
 	int bulkStatus;
-	UINT32 totalSize;
 	BYTE updateCode;
 	BYTE fragmentation;
 	BYTE compression;
@@ -501,10 +537,9 @@ static int fastpath_recv_update_data(rdpFastPath* fastpath, wStream* s)
 		return -1;
 	}
 
-	cs = s;
-	next_pos = Stream_GetPosition(s) + size;
 	bulkStatus = bulk_decompress(rdp->bulk, Stream_Pointer(s), size, &pDstData, &DstSize,
 	                             compressionFlags);
+	Stream_Seek(s, size);
 
 	if (bulkStatus < 0)
 	{
@@ -512,19 +547,10 @@ static int fastpath_recv_update_data(rdpFastPath* fastpath, wStream* s)
 		return -1;
 	}
 
-	if (bulkStatus > 0)
-	{
-		/* data was compressed, copy from decompression buffer */
-		size = DstSize;
+	if (!Stream_EnsureRemainingCapacity(fastpath->updateData, DstSize))
+		return -1;
 
-		if (!(cs = StreamPool_Take(transport->ReceivePool, DstSize)))
-			return -1;
-
-		Stream_SetPosition(cs, 0);
-		Stream_Write(cs, pDstData, DstSize);
-		Stream_SealLength(cs);
-		Stream_SetPosition(cs, 0);
-	}
+	Stream_Write(fastpath->updateData, pDstData, DstSize);
 
 	if (fragmentation == FASTPATH_FRAGMENT_SINGLE)
 	{
@@ -534,8 +560,10 @@ static int fastpath_recv_update_data(rdpFastPath* fastpath, wStream* s)
 			goto out_fail;
 		}
 
-		totalSize = size;
-		status = fastpath_recv_update(fastpath, updateCode, totalSize, cs);
+		Stream_SealLength(fastpath->updateData);
+		Stream_SetPosition(fastpath->updateData, 0);
+		status = fastpath_recv_update(fastpath, updateCode, fastpath->updateData);
+		Stream_SetPosition(fastpath->updateData, 0);
 
 		if (status < 0)
 		{
@@ -545,6 +573,15 @@ static int fastpath_recv_update_data(rdpFastPath* fastpath, wStream* s)
 	}
 	else
 	{
+		const size_t totalSize = Stream_GetPosition(fastpath->updateData);
+
+		if (totalSize > transport->settings->MultifragMaxRequestSize)
+		{
+			WLog_ERR(TAG, "Total size (%"PRIuz") exceeds MultifragMaxRequestSize (%"PRIu32")",
+			         totalSize, transport->settings->MultifragMaxRequestSize);
+			goto out_fail;
+		}
+
 		if (fragmentation == FASTPATH_FRAGMENT_FIRST)
 		{
 			if (fastpath->fragmentation != -1)
@@ -554,20 +591,6 @@ static int fastpath_recv_update_data(rdpFastPath* fastpath, wStream* s)
 			}
 
 			fastpath->fragmentation = FASTPATH_FRAGMENT_FIRST;
-			totalSize = size;
-
-			if (totalSize > transport->settings->MultifragMaxRequestSize)
-			{
-				WLog_ERR(TAG, "Total size (%"PRIu32") exceeds MultifragMaxRequestSize (%"PRIu32")",
-				         totalSize, transport->settings->MultifragMaxRequestSize);
-				goto out_fail;
-			}
-
-			if (!(fastpath->updateData = StreamPool_Take(transport->ReceivePool, size)))
-				goto out_fail;
-
-			Stream_SetPosition(fastpath->updateData, 0);
-			Stream_Copy(cs, fastpath->updateData, size);
 		}
 		else if (fragmentation == FASTPATH_FRAGMENT_NEXT)
 		{
@@ -579,22 +602,6 @@ static int fastpath_recv_update_data(rdpFastPath* fastpath, wStream* s)
 			}
 
 			fastpath->fragmentation = FASTPATH_FRAGMENT_NEXT;
-			totalSize = Stream_GetPosition(fastpath->updateData) + size;
-
-			if (totalSize > transport->settings->MultifragMaxRequestSize)
-			{
-				WLog_ERR(TAG, "Total size (%"PRIu32") exceeds MultifragMaxRequestSize (%"PRIu32")",
-				         totalSize, transport->settings->MultifragMaxRequestSize);
-				goto out_fail;
-			}
-
-			if (!Stream_EnsureCapacity(fastpath->updateData, totalSize))
-			{
-				WLog_ERR(TAG,  "Couldn't re-allocate memory for stream");
-				goto out_fail;
-			}
-
-			Stream_Copy(cs, fastpath->updateData, size);
 		}
 		else if (fragmentation == FASTPATH_FRAGMENT_LAST)
 		{
@@ -606,26 +613,10 @@ static int fastpath_recv_update_data(rdpFastPath* fastpath, wStream* s)
 			}
 
 			fastpath->fragmentation = -1;
-			totalSize = Stream_GetPosition(fastpath->updateData) + size;
-
-			if (totalSize > transport->settings->MultifragMaxRequestSize)
-			{
-				WLog_ERR(TAG, "Total size (%"PRIu32") exceeds MultifragMaxRequestSize (%"PRIu32")",
-				         totalSize, transport->settings->MultifragMaxRequestSize);
-				goto out_fail;
-			}
-
-			if (!Stream_EnsureCapacity(fastpath->updateData, totalSize))
-			{
-				WLog_ERR(TAG,  "Couldn't re-allocate memory for stream");
-				goto out_fail;
-			}
-
-			Stream_Copy(cs, fastpath->updateData, size);
 			Stream_SealLength(fastpath->updateData);
 			Stream_SetPosition(fastpath->updateData, 0);
-			status = fastpath_recv_update(fastpath, updateCode, totalSize, fastpath->updateData);
-			Stream_Release(fastpath->updateData);
+			status = fastpath_recv_update(fastpath, updateCode, fastpath->updateData);
+			Stream_SetPosition(fastpath->updateData, 0);
 
 			if (status < 0)
 			{
@@ -635,43 +626,41 @@ static int fastpath_recv_update_data(rdpFastPath* fastpath, wStream* s)
 		}
 	}
 
-	Stream_SetPosition(s, next_pos);
-
-	if (cs != s)
-		Stream_Release(cs);
-
 	return status;
 out_fail:
-
-	if (cs != s)
-	{
-		Stream_Release(cs);
-	}
-
 	return -1;
 }
 
 int fastpath_recv_updates(rdpFastPath* fastpath, wStream* s)
 {
+	int rc = -2;
 	rdpUpdate* update;
 
 	if (!fastpath || !fastpath->rdp || !fastpath->rdp->update || !s)
 		return -1;
 
 	update = fastpath->rdp->update;
-	IFCALL(update->BeginPaint, update->context);
+
+	if (!update_begin_paint(update))
+		goto fail;
 
 	while (Stream_GetRemainingLength(s) >= 3)
 	{
 		if (fastpath_recv_update_data(fastpath, s) < 0)
 		{
 			WLog_ERR(TAG, "fastpath_recv_update_data() fail");
-			return -1;
+			rc = -3;
+			goto fail;
 		}
 	}
 
-	IFCALL(update->EndPaint, update->context);
-	return 0;
+	rc = 0;
+fail:
+
+	if (!update_end_paint(update))
+		return -4;
+
+	return rc;
 }
 
 static BOOL fastpath_read_input_event_header(wStream* s, BYTE* eventFlags, BYTE* eventCode)
@@ -714,6 +703,9 @@ static BOOL fastpath_recv_input_event_scancode(rdpFastPath* fastpath, wStream* s
 
 	if ((eventFlags & FASTPATH_INPUT_KBDFLAGS_EXTENDED))
 		flags |= KBD_FLAGS_EXTENDED;
+
+	if ((eventFlags & FASTPATH_INPUT_KBDFLAGS_PREFIX_E1))
+		flags |= KBD_FLAGS_EXTENDED1;
 
 	return IFCALLRESULT(TRUE, input->KeyboardEvent, input, flags, code);
 }
@@ -790,8 +782,8 @@ static BOOL fastpath_recv_input_event_unicode(rdpFastPath* fastpath, wStream* s,
 	else
 		flags |= KBD_FLAGS_DOWN;
 
-	IFCALL(fastpath->rdp->input->UnicodeKeyboardEvent, fastpath->rdp->input, flags, unicodeCode);
-	return TRUE;
+	return IFCALLRESULT(FALSE, fastpath->rdp->input->UnicodeKeyboardEvent, fastpath->rdp->input, flags,
+	                    unicodeCode);
 }
 
 static BOOL fastpath_recv_input_event(rdpFastPath* fastpath, wStream* s)
@@ -934,12 +926,16 @@ wStream* fastpath_input_pdu_init(rdpFastPath* fastpath, BYTE eventFlags, BYTE ev
 
 BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, int iNumEvents)
 {
+	BOOL rc = FALSE;
 	rdpRdp* rdp;
 	UINT16 length;
 	BYTE eventHeader;
 
-	if (!fastpath || !fastpath->rdp || !s)
+	if (!s)
 		return FALSE;
+
+	if (!fastpath || !fastpath->rdp)
+		goto fail;
 
 	/*
 	 *  A maximum of 15 events are allowed per request
@@ -947,7 +943,7 @@ BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, int iNu
 	 *  see MS-RDPBCGR 2.2.8.1.2 for details
 	 */
 	if (iNumEvents > 15)
-		return FALSE;
+		goto fail;
 
 	rdp = fastpath->rdp;
 	length = Stream_GetPosition(s);
@@ -955,7 +951,7 @@ BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, int iNu
 	if (length >= (2 << 14))
 	{
 		WLog_ERR(TAG, "Maximum FastPath PDU length is 32767");
-		return FALSE;
+		goto fail;
 	}
 
 	eventHeader = FASTPATH_INPUT_ACTION_FASTPATH;
@@ -990,13 +986,13 @@ BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, int iNu
 			Stream_Write_UINT8(s, pad); /* padding */
 
 			if (!security_hmac_signature(fpInputEvents, fpInputEvents_length, Stream_Pointer(s), rdp))
-				return FALSE;
+				goto fail;
 
 			if (pad)
 				memset(fpInputEvents + fpInputEvents_length, 0, pad);
 
 			if (!security_fips_encrypt(fpInputEvents, fpInputEvents_length + pad, rdp))
-				return FALSE;
+				goto fail;
 
 			length += pad;
 		}
@@ -1011,7 +1007,7 @@ BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, int iNu
 				status = security_mac_signature(rdp, fpInputEvents, fpInputEvents_length, Stream_Pointer(s));
 
 			if (!status || !security_encrypt(fpInputEvents, fpInputEvents_length, rdp))
-				return FALSE;
+				goto fail;
 		}
 	}
 
@@ -1028,9 +1024,12 @@ BOOL fastpath_send_multiple_input_pdu(rdpFastPath* fastpath, wStream* s, int iNu
 	Stream_SealLength(s);
 
 	if (transport_write(fastpath->rdp->transport, s) < 0)
-		return FALSE;
+		goto fail;
 
-	return TRUE;
+	rc = TRUE;
+fail:
+	Stream_Release(s);
+	return rc;
 }
 
 BOOL fastpath_send_input_pdu(rdpFastPath* fastpath, wStream* s)
@@ -1244,13 +1243,14 @@ rdpFastPath* fastpath_new(rdpRdp* rdp)
 	fastpath->rdp = rdp;
 	fastpath->fragmentation = -1;
 	fastpath->fs = Stream_New(NULL, FASTPATH_MAX_PACKET_SIZE);
+	fastpath->updateData = Stream_New(NULL, FASTPATH_MAX_PACKET_SIZE);
 
-	if (!fastpath->fs)
+	if (!fastpath->fs || !fastpath->updateData)
 		goto out_free;
 
 	return fastpath;
 out_free:
-	free(fastpath);
+	fastpath_free(fastpath);
 	return NULL;
 }
 
@@ -1258,6 +1258,7 @@ void fastpath_free(rdpFastPath* fastpath)
 {
 	if (fastpath)
 	{
+		Stream_Free(fastpath->updateData, TRUE);
 		Stream_Free(fastpath->fs, TRUE);
 		free(fastpath);
 	}

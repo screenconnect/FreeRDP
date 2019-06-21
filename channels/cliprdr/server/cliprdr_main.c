@@ -91,7 +91,7 @@ wStream* cliprdr_server_packet_new(UINT16 msgType, UINT16 msgFlags,
  */
 UINT cliprdr_server_packet_send(CliprdrServerPrivate* cliprdr, wStream* s)
 {
-	UINT32 pos;
+	size_t pos;
 	BOOL status;
 	UINT32 dataLen;
 	UINT32 written;
@@ -628,7 +628,7 @@ static UINT cliprdr_server_receive_format_list(CliprdrServerContext* context,
 {
 	UINT32 index;
 	UINT32 dataLen;
-	UINT32 position;
+	size_t position;
 	BOOL asciiNames;
 	int formatNameLength;
 	char* szFormatName;
@@ -929,22 +929,20 @@ static UINT cliprdr_server_receive_format_data_response(
 {
 	CLIPRDR_FORMAT_DATA_RESPONSE formatDataResponse;
 	UINT error = CHANNEL_RC_OK;
+
 	WLog_DBG(TAG, "CliprdrClientFormatDataResponse");
 	formatDataResponse.msgType = CB_FORMAT_DATA_RESPONSE;
 	formatDataResponse.msgFlags = header->msgFlags;
 	formatDataResponse.dataLen = header->dataLen;
 	formatDataResponse.requestedFormatData = NULL;
 
-	if (Stream_GetRemainingLength(s) < header->dataLen)
+	if (header->dataLen)
+		formatDataResponse.requestedFormatData = Stream_Pointer(s);
+
+	if (!Stream_SafeSeek(s, header->dataLen))
 	{
 		WLog_ERR(TAG, "not enough data in stream!");
 		return ERROR_INVALID_DATA;
-	}
-
-	if (header->dataLen)
-	{
-		formatDataResponse.requestedFormatData = (BYTE*) malloc(header->dataLen);
-		Stream_Read(s, formatDataResponse.requestedFormatData, header->dataLen);
 	}
 
 	IFCALLRET(context->ClientFormatDataResponse, error, context,
@@ -953,7 +951,6 @@ static UINT cliprdr_server_receive_format_data_response(
 	if (error)
 		WLog_ERR(TAG, "ClientFormatDataResponse failed with error %"PRIu32"!", error);
 
-	free(formatDataResponse.requestedFormatData);
 	return error;
 }
 
@@ -1185,7 +1182,7 @@ static UINT cliprdr_server_init(CliprdrServerContext* context)
 UINT cliprdr_server_read(CliprdrServerContext* context)
 {
 	wStream* s;
-	int position;
+	size_t position;
 	DWORD BytesToRead;
 	DWORD BytesReturned;
 	CLIPRDR_HEADER header;
@@ -1319,7 +1316,7 @@ UINT cliprdr_server_read(CliprdrServerContext* context)
 	return CHANNEL_RC_OK;
 }
 
-static void* cliprdr_server_thread(void* arg)
+static DWORD WINAPI cliprdr_server_thread(LPVOID arg)
 {
 	DWORD status;
 	DWORD nCount;
@@ -1388,8 +1385,8 @@ out:
 		setChannelError(context->rdpcontext, error,
 		                "cliprdr_server_thread reported an error");
 
-	ExitThread((DWORD)error);
-	return NULL;
+	ExitThread(error);
+	return error;
 }
 
 /**
@@ -1478,8 +1475,7 @@ static UINT cliprdr_server_start(CliprdrServerContext* context)
 		return ERROR_INTERNAL_ERROR;
 	}
 
-	if (!(cliprdr->Thread = CreateThread(NULL, 0,
-	                                     (LPTHREAD_START_ROUTINE) cliprdr_server_thread, (void*) context, 0, NULL)))
+	if (!(cliprdr->Thread = CreateThread(NULL, 0, cliprdr_server_thread, (void*) context, 0, NULL)))
 	{
 		WLog_ERR(TAG, "CreateThread failed!");
 		CloseHandle(cliprdr->StopEvent);

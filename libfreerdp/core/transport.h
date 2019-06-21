@@ -17,8 +17,8 @@
  * limitations under the License.
  */
 
-#ifndef __TRANSPORT_H
-#define __TRANSPORT_H
+#ifndef FREERDP_LIB_CORE_TRANSPORT_H
+#define FREERDP_LIB_CORE_TRANSPORT_H
 
 typedef enum
 {
@@ -70,9 +70,6 @@ struct rdp_transport
 	TransportRecv ReceiveCallback;
 	wStreamPool* ReceivePool;
 	HANDLE connectedEvent;
-	HANDLE stopEvent;
-	HANDLE thread;
-	BOOL async;
 	BOOL NlaMode;
 	BOOL blocking;
 	BOOL GatewayEnabled;
@@ -96,7 +93,7 @@ FREERDP_LOCAL BOOL transport_connect_nla(rdpTransport* transport);
 FREERDP_LOCAL BOOL transport_accept_rdp(rdpTransport* transport);
 FREERDP_LOCAL BOOL transport_accept_tls(rdpTransport* transport);
 FREERDP_LOCAL BOOL transport_accept_nla(rdpTransport* transport);
-FREERDP_LOCAL void transport_stop(rdpTransport* transport);
+
 FREERDP_LOCAL int transport_read_pdu(rdpTransport* transport, wStream* s);
 FREERDP_LOCAL int transport_write(rdpTransport* transport, wStream* s);
 
@@ -123,4 +120,4 @@ FREERDP_LOCAL int transport_receive_pool_return(rdpTransport* transport,
 FREERDP_LOCAL rdpTransport* transport_new(rdpContext* context);
 FREERDP_LOCAL void transport_free(rdpTransport* transport);
 
-#endif
+#endif /* FREERDP_LIB_CORE_TRANSPORT_H */

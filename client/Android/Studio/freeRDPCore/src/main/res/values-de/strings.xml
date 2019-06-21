@@ -113,7 +113,6 @@
     <string name="settings_remote_program">Remote Program</string>
     <string name="settings_work_dir">Arbeitsverzeichnis</string>
     <string name="settings_async_channel">Async channel</string>
-    <string name="settings_async_transport">Async transport</string>
     <string name="settings_async_input">Async input</string>
     <string name="settings_async_update">Async update</string>
     <string name="settings_console_mode">Konsolenmodus</string>
@@ -122,6 +121,7 @@
     <string name="settings_password_empty">nicht gesetzt</string>
     <string name="settings_cat_ui">Benutzeroberfläche</string>
     <string name="settings_ui_hide_status_bar">verstecke Statusleiste</string>
+    <string name="settings_ui_hide_action_bar">Aktionsleiste ausblenden</string>
     <string name="settings_ui_hide_zoom_controls">verstecke Zoom Tasten</string>
     <string name="settings_ui_swap_mouse_buttons">Vertausche Maustasten</string>
     <string name="settings_ui_invert_scrolling">Invertiere Bildlauf</string>

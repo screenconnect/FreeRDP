@@ -33,13 +33,14 @@
 #include <sys/epoll.h>
 
 #include "uwac-os.h"
+#include "wayland-cursor.h"
 
-#define TARGET_COMPOSITOR_INTERFACE 3
-#define TARGET_SHM_INTERFACE 1
-#define TARGET_SHELL_INTERFACE 1
-#define TARGET_DDM_INTERFACE 1
-#define TARGET_SEAT_INTERFACE 5
-#define TARGET_XDG_VERSION 5 /* The version of xdg-shell that we implement */
+#define TARGET_COMPOSITOR_INTERFACE 3U
+#define TARGET_SHM_INTERFACE 1U
+#define TARGET_SHELL_INTERFACE 1U
+#define TARGET_DDM_INTERFACE 1U
+#define TARGET_SEAT_INTERFACE 5U
+#define TARGET_XDG_VERSION 5U /* The version of xdg-shell that we implement */
 
 static const char* event_names[] =
 {
@@ -103,41 +104,60 @@ struct wl_shm_listener shm_listener =
 	cb_shm_format
 };
 
-static void xdg_shell_ping(void* data, struct xdg_shell* shell, uint32_t serial)
+static void xdg_shell_ping(void *data,
+                                       struct xdg_wm_base *xdg_wm_base,
+                                       uint32_t serial)
 {
-	xdg_shell_pong(shell, serial);
+	xdg_wm_base_pong(xdg_wm_base, serial);
 }
 
-static const struct xdg_shell_listener xdg_shell_listener =
+static const struct xdg_wm_base_listener xdg_wm_base_listener =
 {
 	xdg_shell_ping,
 };
 
 #ifdef BUILD_FULLSCREEN_SHELL
-static void fullscreen_capability(void* data, struct _wl_fullscreen_shell* _wl_fullscreen_shell,
-                                  uint32_t capabilty)
+static void fullscreen_capability(void *data,
+                                                     struct zwp_fullscreen_shell_v1 *zwp_fullscreen_shell_v1,
+                                                     uint32_t capability)
 {
 }
 
-static const struct _wl_fullscreen_shell_listener fullscreen_shell_listener =
+static const struct zwp_fullscreen_shell_v1_listener fullscreen_shell_listener =
 {
 	fullscreen_capability,
 };
 #endif
 
 
-static UwacSeat* display_destroy_seat(UwacDisplay* d, uint32_t name)
+static void display_destroy_seat(UwacDisplay* d, uint32_t name)
 {
-	UwacSeat* seat;
-	wl_list_for_each(seat, &d->seats, link)
+	UwacSeat* seat, *tmp;
+	wl_list_for_each_safe(seat, tmp, &d->seats, link)
 	{
 		if (seat->seat_id == name)
 		{
 			UwacSeatDestroy(seat);
-			return seat;
 		}
 	}
-	return NULL;
+}
+
+static void UwacSeatRegisterDDM(UwacSeat *seat)
+{
+	UwacDisplay *d = seat->display;
+	if (!d->data_device_manager)
+		return;
+
+	if (!seat->data_device)
+		seat->data_device = wl_data_device_manager_get_data_device(d->data_device_manager, seat->seat);
+}
+
+static void UwacRegisterCursor(UwacSeat* seat)
+{
+	if (!seat || !seat->display || !seat->display->compositor)
+		return;
+
+	seat->pointer_surface = wl_compositor_create_surface(seat->display->compositor);
 }
 
 static void registry_handle_global(void* data, struct wl_registry* registry, uint32_t id,
@@ -145,7 +165,7 @@ static void registry_handle_global(void* data, struct wl_registry* registry, uin
 {
 	UwacDisplay* d = data;
 	UwacGlobal* global;
-	global = xmalloc(sizeof * global);
+	global = xzalloc(sizeof * global);
 	global->name = id;
 	global->interface = xstrdup(interface);
 	global->version = version;
@@ -190,6 +210,9 @@ static void registry_handle_global(void* data, struct wl_registry* registry, uin
 			return;
 		}
 
+		UwacSeatRegisterDDM(seat);
+		UwacSeatRegisterClipboard(seat);
+		UwacRegisterCursor(seat);
 		ev = (UwacSeatNewEvent*)UwacDisplayNewEvent(d, UWAC_EVENT_NEW_SEAT);
 
 		if (!ev)
@@ -202,34 +225,54 @@ static void registry_handle_global(void* data, struct wl_registry* registry, uin
 	}
 	else if (strcmp(interface, "wl_data_device_manager") == 0)
 	{
+		UwacSeat* seat, *tmp;
+
 		d->data_device_manager = wl_registry_bind(registry, id, &wl_data_device_manager_interface,
 		                         min(TARGET_DDM_INTERFACE, version));
+
+		wl_list_for_each_safe(seat, tmp, &d->seats, link)
+		{
+			UwacSeatRegisterDDM(seat);
+			UwacSeatRegisterClipboard(seat);
+			UwacRegisterCursor(seat);
+		}
 	}
 	else if (strcmp(interface, "wl_shell") == 0)
 	{
 		d->shell = wl_registry_bind(registry, id, &wl_shell_interface, min(TARGET_SHELL_INTERFACE,
 		                            version));
 	}
-	else if (strcmp(interface, "xdg_shell") == 0)
+	else if (strcmp(interface, "xdg_wm_base") == 0)
 	{
-		d->xdg_shell = wl_registry_bind(registry, id, &xdg_shell_interface, 1);
-		xdg_shell_use_unstable_version(d->xdg_shell, TARGET_XDG_VERSION);
-		xdg_shell_add_listener(d->xdg_shell, &xdg_shell_listener, d);
-#if BUILD_IVI
+		d->xdg_base = wl_registry_bind(registry, id, &xdg_wm_base_interface, 1);
+		xdg_wm_base_add_listener(d->xdg_base, &xdg_wm_base_listener, d);
 	}
+	else if (strcmp(interface, "zwp_keyboard_shortcuts_inhibit_manager_v1") == 0)
+	{
+		d->keyboard_inhibit_manager = wl_registry_bind(registry, id, &zwp_keyboard_shortcuts_inhibit_manager_v1_interface, 1);
+	}
+	else if (strcmp(interface, "zxdg_decoration_manager_v1") == 0)
+	{
+		d->deco_manager = wl_registry_bind(registry, id, &zxdg_decoration_manager_v1_interface, 1);
+	}
+	else if (strcmp(interface, "org_kde_kwin_server_decoration_manager") == 0)
+	{
+		d->kde_deco_manager = wl_registry_bind(registry, id, &org_kde_kwin_server_decoration_manager_interface, 1);
+	}
+#if BUILD_IVI
 	else if (strcmp(interface, "ivi_application") == 0)
 	{
 		d->ivi_application = wl_registry_bind(registry, id, &ivi_application_interface, 1);
+	}
 #endif
 #if BUILD_FULLSCREEN_SHELL
-	}
-	else if (strcmp(interface, "_wl_fullscreen_shell") == 0)
+	else if (strcmp(interface, "zwp_fullscreen_shell_v1") == 0)
 	{
-		d->fullscreen_shell = wl_registry_bind(registry, id, &_wl_fullscreen_shell_interface, 1);
-		_wl_fullscreen_shell_add_listener(d->fullscreen_shell, &fullscreen_shell_listener, d);
+		d->fullscreen_shell = wl_registry_bind(registry, id, &zwp_fullscreen_shell_v1_interface, 1);
+		zwp_fullscreen_shell_v1_add_listener(d->fullscreen_shell, &fullscreen_shell_listener, d);
+	}
 #endif
 #if 0
-	}
 	else if (strcmp(interface, "text_cursor_position") == 0)
 	{
 		d->text_cursor_position = wl_registry_bind(registry, id, &text_cursor_position_interface, 1);
@@ -242,7 +285,6 @@ static void registry_handle_global(void* data, struct wl_registry* registry, uin
 	{
 		d->subcompositor = wl_registry_bind(registry, id, &wl_subcompositor_interface, 1);
 #endif
-	}
 }
 
 static void registry_handle_global_remove(void* data, struct wl_registry* registry, uint32_t name)
@@ -265,12 +307,11 @@ static void registry_handle_global_remove(void* data, struct wl_registry* regist
 		if (strcmp(global->interface, "wl_seat") == 0)
 		{
 			UwacSeatRemovedEvent* ev;
-			UwacSeat* seat;
-			seat = display_destroy_seat(d, name);
+			display_destroy_seat(d, name);
 			ev = (UwacSeatRemovedEvent*)UwacDisplayNewEvent(d, UWAC_EVENT_REMOVED_SEAT);
 
 			if (ev)
-				ev->seat = seat;
+				ev->id = name;
 		}
 
 		wl_list_remove(&global->link);
@@ -363,7 +404,7 @@ static void display_dispatch_events(UwacTask* task, uint32_t events)
 UwacDisplay* UwacOpenDisplay(const char* name, UwacReturnCode* err)
 {
 	UwacDisplay* ret;
-	ret = (UwacDisplay*)calloc(1, sizeof(*ret));
+	ret = (UwacDisplay*)xzalloc(sizeof(*ret));
 
 	if (!ret)
 	{
@@ -512,10 +553,19 @@ UwacReturnCode UwacCloseDisplay(UwacDisplay** pdisplay)
 	if (display->compositor)
 		wl_compositor_destroy(display->compositor);
 
+	if (display->keyboard_inhibit_manager)
+		zwp_keyboard_shortcuts_inhibit_manager_v1_destroy(display->keyboard_inhibit_manager);
+
+	if (display->deco_manager)
+		zxdg_decoration_manager_v1_destroy(display->deco_manager);
+
+	if (display->kde_deco_manager)
+		org_kde_kwin_server_decoration_manager_destroy(display->kde_deco_manager);
+
 #ifdef BUILD_FULLSCREEN_SHELL
 
 	if (display->fullscreen_shell)
-		_wl_fullscreen_shell_destroy(display->fullscreen_shell);
+		zwp_fullscreen_shell_v1_destroy(display->fullscreen_shell);
 
 #endif
 #ifdef BUILD_IVI
@@ -525,8 +575,11 @@ UwacReturnCode UwacCloseDisplay(UwacDisplay** pdisplay)
 
 #endif
 
-	if (display->xdg_shell)
-		xdg_shell_destroy(display->xdg_shell);
+	if (display->xdg_toplevel)
+		xdg_toplevel_destroy(display->xdg_toplevel);
+
+	if (display->xdg_base)
+		xdg_wm_base_destroy(display->xdg_base);
 
 	if (display->shell)
 		wl_shell_destroy(display->shell);
@@ -588,12 +641,12 @@ const char* UwacErrorString(UwacReturnCode error)
 UwacReturnCode UwacDisplayQueryInterfaceVersion(const UwacDisplay* display, const char* name,
         uint32_t* version)
 {
-	const UwacGlobal* global;
+	const UwacGlobal* global, *tmp;
 
 	if (!display)
 		return UWAC_ERROR_INVALID_DISPLAY;
 
-	wl_list_for_each(global, &display->globals, link)
+	wl_list_for_each_safe(global, tmp, &display->globals, link)
 	{
 		if (strcmp(global->interface, name) == 0)
 		{
@@ -630,7 +683,7 @@ UwacReturnCode UwacDisplayQueryShmFormats(const UwacDisplay* display, enum wl_sh
 	if (!display)
 		return UWAC_ERROR_INVALID_DISPLAY;
 
-	*filled = min(display->shm_formats_nb, formats_size);
+	*filled = min((int64_t)display->shm_formats_nb, formats_size);
 	memcpy(formats, (const void*)display->shm_formats, *filled * sizeof(enum wl_shm_format));
 	return UWAC_SUCCESS;
 }
@@ -677,7 +730,7 @@ UwacEvent* UwacDisplayNewEvent(UwacDisplay* display, int type)
 		return 0;
 	}
 
-	ret = zalloc(sizeof(UwacEventListItem));
+	ret = xzalloc(sizeof(UwacEventListItem));
 
 	if (!ret)
 	{
@@ -703,7 +756,6 @@ bool UwacHasEvent(UwacDisplay* display)
 {
 	return display->pop_queue != NULL;
 }
-
 
 UwacReturnCode UwacNextEvent(UwacDisplay* display, UwacEvent* event)
 {

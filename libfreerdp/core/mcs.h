@@ -19,8 +19,8 @@
  * limitations under the License.
  */
 
-#ifndef __MCS_H
-#define __MCS_H
+#ifndef FREERDP_LIB_CORE_MCS_H
+#define FREERDP_LIB_CORE_MCS_H
 
 typedef struct rdp_mcs rdpMcs;
 
@@ -54,15 +54,6 @@ enum MCS_Result
 	MCS_Result_unspecified_failure = 14,
 	MCS_Result_user_rejected = 15,
 	MCS_Result_enum_length = 16
-};
-
-enum MCS_Reason
-{
-	MCS_Reason_domain_disconnected = 0,
-	MCS_Reason_provider_initiated = 1,
-	MCS_Reason_token_purged = 2,
-	MCS_Reason_user_requested = 3,
-	MCS_Reason_channel_purged = 4
 };
 
 enum DomainMCSPDU
@@ -201,4 +192,4 @@ FREERDP_LOCAL BOOL mcs_client_begin(rdpMcs* mcs);
 FREERDP_LOCAL rdpMcs* mcs_new(rdpTransport* transport);
 FREERDP_LOCAL void mcs_free(rdpMcs* mcs);
 
-#endif /* __MCS_H */
+#endif /* FREERDP_LIB_CORE_MCS_H */

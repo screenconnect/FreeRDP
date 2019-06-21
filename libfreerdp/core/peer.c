@@ -171,10 +171,7 @@ static int freerdp_peer_virtual_channel_write(freerdp_peer* client, HANDLE hChan
 		Stream_Write(s, buffer, chunkSize);
 
 		if (!rdp_send(rdp, s, peerChannel->channelId))
-		{
-			Stream_Release(s);
 			return -1;
-		}
 
 		buffer += chunkSize;
 		length -= chunkSize;
@@ -371,12 +368,12 @@ static int peer_recv_tpkt_pdu(freerdp_peer* client, wStream* s)
 
 	if (rdp->settings->UseRdpSecurityLayer)
 	{
-		if (!rdp_read_security_header(s, &securityFlags))
+		if (!rdp_read_security_header(s, &securityFlags, &length))
 			return -1;
 
 		if (securityFlags & SEC_ENCRYPT)
 		{
-			if (!rdp_decrypt(rdp, s, length - 4, securityFlags))
+			if (!rdp_decrypt(rdp, s, length, securityFlags))
 			{
 				WLog_ERR(TAG, "rdp_decrypt failed");
 				return -1;
@@ -418,7 +415,7 @@ static int peer_recv_tpkt_pdu(freerdp_peer* client, wStream* s)
 	else if (rdp->mcs->messageChannelId && channelId == rdp->mcs->messageChannelId)
 	{
 		if (!rdp->settings->UseRdpSecurityLayer)
-			if (!rdp_read_security_header(s, &securityFlags))
+			if (!rdp_read_security_header(s, &securityFlags, NULL))
 				return -1;
 
 		return rdp_recv_message_channel_pdu(rdp, s, securityFlags);
@@ -467,6 +464,7 @@ static int peer_recv_pdu(freerdp_peer* client, wStream* s)
 
 static int peer_recv_callback(rdpTransport* transport, wStream* s, void* extra)
 {
+	UINT32 SelectedProtocol;
 	freerdp_peer* client = (freerdp_peer*) extra;
 	rdpRdp* rdp = client->context->rdp;
 
@@ -479,16 +477,17 @@ static int peer_recv_callback(rdpTransport* transport, wStream* s, void* extra)
 				return -1;
 			}
 
-			client->settings->NlaSecurity = (rdp->nego->SelectedProtocol & PROTOCOL_NLA) ? TRUE : FALSE;
-			client->settings->TlsSecurity = (rdp->nego->SelectedProtocol & PROTOCOL_TLS) ? TRUE : FALSE;
-			client->settings->RdpSecurity = (rdp->nego->SelectedProtocol & PROTOCOL_RDP) ? TRUE : FALSE;
+			SelectedProtocol = nego_get_selected_protocol(rdp->nego);
+			client->settings->NlaSecurity = (SelectedProtocol & PROTOCOL_HYBRID) ? TRUE : FALSE;
+			client->settings->TlsSecurity = (SelectedProtocol & PROTOCOL_SSL) ? TRUE : FALSE;
+			client->settings->RdpSecurity = (SelectedProtocol == PROTOCOL_RDP) ? TRUE : FALSE;
 
-			if (rdp->nego->SelectedProtocol & PROTOCOL_NLA)
+			if (SelectedProtocol & PROTOCOL_HYBRID)
 			{
-				sspi_CopyAuthIdentity(&client->identity, rdp->nego->transport->nla->identity);
+				SEC_WINNT_AUTH_IDENTITY* identity = nego_get_identity(rdp->nego);
+				sspi_CopyAuthIdentity(&client->identity, identity);
 				IFCALLRET(client->Logon, client->authenticated, client, &client->identity, TRUE);
-				nla_free(rdp->nego->transport->nla);
-				rdp->nego->transport->nla = NULL;
+				nego_free_nla(rdp->nego);
 			}
 			else
 			{
@@ -568,21 +567,46 @@ static int peer_recv_callback(rdpTransport* transport, wStream* s, void* extra)
 			break;
 
 		case CONNECTION_STATE_LICENSING:
-			if (!license_send_valid_client_error_packet(rdp->license))
 			{
-				WLog_ERR(TAG,
-				         "peer_recv_callback: CONNECTION_STATE_LICENSING - license_send_valid_client_error_packet() fail");
-				return -1;
-			}
+				LicenseCallbackResult res;
 
-			rdp_server_transition_to_state(rdp, CONNECTION_STATE_CAPABILITIES_EXCHANGE);
-			return peer_recv_callback(transport, NULL, extra);
-			break;
+				if (!client->LicenseCallback)
+				{
+					WLog_ERR(TAG,
+					         "peer_recv_callback: LicenseCallback has been removed, assuming licensing is ok (please fix your app)");
+					res = LICENSE_CB_COMPLETED;
+				}
+				else
+					res = client->LicenseCallback(client, s);
+
+				switch (res)
+				{
+					case LICENSE_CB_INTERNAL_ERROR:
+						WLog_ERR(TAG, "peer_recv_callback: CONNECTION_STATE_LICENSING - callback internal error, aborting");
+						return -1;
+
+					case LICENSE_CB_ABORT:
+						return -1;
+
+					case LICENSE_CB_IN_PROGRESS:
+						break;
+
+					case LICENSE_CB_COMPLETED:
+						rdp_server_transition_to_state(rdp, CONNECTION_STATE_CAPABILITIES_EXCHANGE);
+						return peer_recv_callback(transport, NULL, extra);
+
+					default:
+						WLog_ERR(TAG, "peer_recv_callback: CONNECTION_STATE_LICENSING - unknown license callback result %d",
+						         (int)res);
+						break;
+				}
+
+				break;
+			}
 
 		case CONNECTION_STATE_CAPABILITIES_EXCHANGE:
 			if (!rdp->AwaitCapabilities)
 			{
-
 				if (client->Capabilities && !client->Capabilities(client))
 					return -1;
 
@@ -647,10 +671,13 @@ static int peer_recv_callback(rdpTransport* transport, wStream* s, void* extra)
 
 static BOOL freerdp_peer_close(freerdp_peer* client)
 {
+	UINT32 SelectedProtocol;
 	/** if negotiation has failed, we're not MCS connected. So don't
 	 * 	send anything else, or some mstsc will consider that as an error
 	 */
-	if (client->context->rdp->nego->SelectedProtocol & PROTOCOL_FAILED_NEGO)
+	SelectedProtocol = nego_get_selected_protocol(client->context->rdp->nego);
+
+	if (SelectedProtocol & PROTOCOL_FAILED_NEGO)
 		return TRUE;
 
 	/**
@@ -661,7 +688,7 @@ static BOOL freerdp_peer_close(freerdp_peer* client)
 	if (!rdp_send_deactivate_all(client->context->rdp))
 		return FALSE;
 
-	if (freerdp_get_param_bool(client->settings, FreeRDP_SupportErrorInfoPdu))
+	if (freerdp_settings_get_bool(client->settings, FreeRDP_SupportErrorInfoPdu))
 	{
 		rdp_send_error_info(client->context->rdp);
 	}
@@ -675,7 +702,7 @@ static void freerdp_peer_disconnect(freerdp_peer* client)
 	transport_disconnect(transport);
 }
 
-static int freerdp_peer_send_channel_data(freerdp_peer* client, UINT16 channelId, BYTE* data,
+static int freerdp_peer_send_channel_data(freerdp_peer* client, UINT16 channelId, const BYTE* data,
         int size)
 {
 	return rdp_send_channel_data(client->context->rdp, channelId, data, size);
@@ -696,6 +723,19 @@ static int freerdp_peer_drain_output_buffer(freerdp_peer* peer)
 static BOOL freerdp_peer_has_more_to_read(freerdp_peer* peer)
 {
 	return peer->context->rdp->transport->haveMoreBytesToRead;
+}
+
+static LicenseCallbackResult freerdp_peer_nolicense(freerdp_peer* peer, wStream* s)
+{
+	rdpRdp* rdp = peer->context->rdp;
+
+	if (!license_send_valid_client_error_packet(rdp))
+	{
+		WLog_ERR(TAG, "freerdp_peer_nolicense: license_send_valid_client_error_packet() failed");
+		return LICENSE_CB_ABORT;
+	}
+
+	return LICENSE_CB_COMPLETED;
 }
 
 BOOL freerdp_peer_context_new(freerdp_peer* client)
@@ -751,6 +791,7 @@ BOOL freerdp_peer_context_new(freerdp_peer* client)
 	client->IsWriteBlocked = freerdp_peer_is_write_blocked;
 	client->DrainOutputBuffer = freerdp_peer_drain_output_buffer;
 	client->HasMoreToRead = freerdp_peer_has_more_to_read;
+	client->LicenseCallback = freerdp_peer_nolicense;
 	IFCALLRET(client->ContextNew, ret, client, client->context);
 
 	if (ret)

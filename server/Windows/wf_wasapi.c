@@ -133,7 +133,7 @@ int wf_wasapi_get_device_string(LPWSTR pattern, LPWSTR * deviceStr)
 			WLog_INFO(TAG, "Using sound ouput endpoint: [%s] (%s)", nameVar.pwszVal, pwszID);
 			//WLog_INFO(TAG, "matched %d characters", wcscmp(pattern, nameVar.pwszVal);
 			devStrLen = wcslen(pwszID);
-			*deviceStr = (LPWSTR) calloc(1, (devStrLen * 2) + 2);
+			*deviceStr = (LPWSTR) calloc(devStrLen + 1, 2);
 			if (!deviceStr)
 				return -1;
 			wcscpy_s(*deviceStr, devStrLen+1, pwszID);
@@ -160,7 +160,7 @@ int wf_wasapi_get_device_string(LPWSTR pattern, LPWSTR * deviceStr)
 	return 0;
 }
 
-DWORD WINAPI wf_rdpsnd_wasapi_thread(LPVOID lpParam)
+static DWORD WINAPI wf_rdpsnd_wasapi_thread(LPVOID lpParam)
 {
 	IMMDeviceEnumerator *pEnumerator = NULL;
 	IMMDevice *pDevice = NULL;

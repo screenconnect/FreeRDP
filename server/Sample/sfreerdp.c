@@ -27,6 +27,7 @@
 #include <signal.h>
 
 #include <winpr/crt.h>
+#include <winpr/ssl.h>
 #include <winpr/synch.h>
 #include <winpr/string.h>
 #include <winpr/path.h>
@@ -64,7 +65,7 @@ BOOL test_peer_context_new(freerdp_peer* client, testPeerContext* context)
 		goto fail_rfx_context;
 
 	context->rfx_context->mode = RLGR3;
-	rfx_context_set_pixel_format(context->rfx_context, PIXEL_FORMAT_BGRX32);
+	rfx_context_set_pixel_format(context->rfx_context, PIXEL_FORMAT_RGB24);
 
 	if (!(context->nsc_context = nsc_context_new()))
 		goto fail_nsc_context;
@@ -98,6 +99,8 @@ fail_rfx_context:
 
 void test_peer_context_free(freerdp_peer* client, testPeerContext* context)
 {
+	WINPR_UNUSED(client);
+
 	if (context)
 	{
 		if (context->debug_channel_thread)
@@ -147,21 +150,21 @@ static wStream* test_peer_stream_init(testPeerContext* context)
 static void test_peer_begin_frame(freerdp_peer* client)
 {
 	rdpUpdate* update = client->update;
-	SURFACE_FRAME_MARKER* fm = &update->surface_frame_marker;
+	SURFACE_FRAME_MARKER fm;
 	testPeerContext* context = (testPeerContext*) client->context;
-	fm->frameAction = SURFACECMD_FRAMEACTION_BEGIN;
-	fm->frameId = context->frame_id;
-	update->SurfaceFrameMarker(update->context, fm);
+	fm.frameAction = SURFACECMD_FRAMEACTION_BEGIN;
+	fm.frameId = context->frame_id;
+	update->SurfaceFrameMarker(update->context, &fm);
 }
 
 static void test_peer_end_frame(freerdp_peer* client)
 {
 	rdpUpdate* update = client->update;
-	SURFACE_FRAME_MARKER* fm = &update->surface_frame_marker;
+	SURFACE_FRAME_MARKER fm;
 	testPeerContext* context = (testPeerContext*) client->context;
-	fm->frameAction = SURFACECMD_FRAMEACTION_END;
-	fm->frameId = context->frame_id;
-	update->SurfaceFrameMarker(update->context, fm);
+	fm.frameAction = SURFACECMD_FRAMEACTION_END;
+	fm.frameId = context->frame_id;
+	update->SurfaceFrameMarker(update->context, &fm);
 	context->frame_id++;
 }
 
@@ -172,7 +175,7 @@ static BOOL test_peer_draw_background(freerdp_peer* client)
 	RFX_RECT rect;
 	BYTE* rgb_data;
 	rdpUpdate* update = client->update;
-	SURFACE_BITS_COMMAND* cmd = &update->surface_bits_command;
+	SURFACE_BITS_COMMAND cmd = { 0 };
 	testPeerContext* context = (testPeerContext*) client->context;
 	BOOL ret = FALSE;
 
@@ -202,26 +205,27 @@ static BOOL test_peer_draw_background(freerdp_peer* client)
 			goto out;
 		}
 
-		cmd->codecID = client->settings->RemoteFxCodecId;
+		cmd.bmp.codecID = client->settings->RemoteFxCodecId;
 	}
 	else
 	{
 		nsc_compose_message(context->nsc_context, s,
 		                    rgb_data, rect.width, rect.height, rect.width * 3);
-		cmd->codecID = client->settings->NSCodecId;
+		cmd.bmp.codecID = client->settings->NSCodecId;
 	}
 
-	cmd->destLeft = 0;
-	cmd->destTop = 0;
-	cmd->destRight = rect.width;
-	cmd->destBottom = rect.height;
-	cmd->bpp = 32;
-	cmd->width = rect.width;
-	cmd->height = rect.height;
-	cmd->bitmapDataLength = Stream_GetPosition(s);
-	cmd->bitmapData = Stream_Buffer(s);
+	cmd.destLeft = 0;
+	cmd.destTop = 0;
+	cmd.destRight = rect.width;
+	cmd.destBottom = rect.height;
+	cmd.bmp.bpp = 32;
+	cmd.bmp.flags = 0;
+	cmd.bmp.width = rect.width;
+	cmd.bmp.height = rect.height;
+	cmd.bmp.bitmapDataLength = Stream_GetPosition(s);
+	cmd.bmp.bitmapData = Stream_Buffer(s);
 	test_peer_begin_frame(client);
-	update->SurfaceBits(update->context, cmd);
+	update->SurfaceBits(update->context, &cmd);
 	test_peer_end_frame(client);
 	ret = TRUE;
 out:
@@ -266,7 +270,7 @@ static BOOL test_peer_load_icon(freerdp_peer* client)
 	/* Max */
 	fgets(line, sizeof(line), fp);
 
-	if (!(rgb_data = malloc(context->icon_width * context->icon_height * 3)))
+	if (!(rgb_data = calloc(context->icon_height, context->icon_width * 3)))
 		goto out_fail;
 
 	for (i = 0; i < context->icon_width * context->icon_height * 3; i++)
@@ -278,8 +282,7 @@ static BOOL test_peer_load_icon(freerdp_peer* client)
 	}
 
 	/* background with same size, which will be used to erase the icon from old position */
-	if (!(context->bg_data = malloc(context->icon_width * context->icon_height *
-	                                3)))
+	if (!(context->bg_data = calloc(context->icon_height, context->icon_width * 3)))
 		goto out_fail;
 
 	memset(context->bg_data, 0xA0, context->icon_width * context->icon_height * 3);
@@ -298,7 +301,7 @@ static void test_peer_draw_icon(freerdp_peer* client, int x, int y)
 	wStream* s;
 	RFX_RECT rect;
 	rdpUpdate* update = client->update;
-	SURFACE_BITS_COMMAND* cmd = &update->surface_bits_command;
+	SURFACE_BITS_COMMAND cmd = { 0 };
 	testPeerContext* context = (testPeerContext*) client->context;
 
 	if (client->update->dump_rfx)
@@ -324,25 +327,26 @@ static void test_peer_draw_icon(freerdp_peer* client, int x, int y)
 		{
 			rfx_compose_message(context->rfx_context, s,
 			                    &rect, 1, context->bg_data, rect.width, rect.height, rect.width * 3);
-			cmd->codecID = client->settings->RemoteFxCodecId;
+			cmd.bmp.codecID = client->settings->RemoteFxCodecId;
 		}
 		else
 		{
 			nsc_compose_message(context->nsc_context, s,
 			                    context->bg_data, rect.width, rect.height, rect.width * 3);
-			cmd->codecID = client->settings->NSCodecId;
+			cmd.bmp.codecID = client->settings->NSCodecId;
 		}
 
-		cmd->destLeft = context->icon_x;
-		cmd->destTop = context->icon_y;
-		cmd->destRight = context->icon_x + context->icon_width;
-		cmd->destBottom = context->icon_y + context->icon_height;
-		cmd->bpp = 32;
-		cmd->width = context->icon_width;
-		cmd->height = context->icon_height;
-		cmd->bitmapDataLength = Stream_GetPosition(s);
-		cmd->bitmapData = Stream_Buffer(s);
-		update->SurfaceBits(update->context, cmd);
+		cmd.destLeft = context->icon_x;
+		cmd.destTop = context->icon_y;
+		cmd.destRight = context->icon_x + context->icon_width;
+		cmd.destBottom = context->icon_y + context->icon_height;
+		cmd.bmp.bpp = 32;
+		cmd.bmp.flags = 0;
+		cmd.bmp.width = context->icon_width;
+		cmd.bmp.height = context->icon_height;
+		cmd.bmp.bitmapDataLength = Stream_GetPosition(s);
+		cmd.bmp.bitmapData = Stream_Buffer(s);
+		update->SurfaceBits(update->context, &cmd);
 	}
 
 	s = test_peer_stream_init(context);
@@ -351,25 +355,25 @@ static void test_peer_draw_icon(freerdp_peer* client, int x, int y)
 	{
 		rfx_compose_message(context->rfx_context, s,
 		                    &rect, 1, context->icon_data, rect.width, rect.height, rect.width * 3);
-		cmd->codecID = client->settings->RemoteFxCodecId;
+		cmd.bmp.codecID = client->settings->RemoteFxCodecId;
 	}
 	else
 	{
 		nsc_compose_message(context->nsc_context, s,
 		                    context->icon_data, rect.width, rect.height, rect.width * 3);
-		cmd->codecID = client->settings->NSCodecId;
+		cmd.bmp.codecID = client->settings->NSCodecId;
 	}
 
-	cmd->destLeft = x;
-	cmd->destTop = y;
-	cmd->destRight = x + context->icon_width;
-	cmd->destBottom = y + context->icon_height;
-	cmd->bpp = 32;
-	cmd->width = context->icon_width;
-	cmd->height = context->icon_height;
-	cmd->bitmapDataLength = Stream_GetPosition(s);
-	cmd->bitmapData = Stream_Buffer(s);
-	update->SurfaceBits(update->context, cmd);
+	cmd.destLeft = x;
+	cmd.destTop = y;
+	cmd.destRight = x + context->icon_width;
+	cmd.destBottom = y + context->icon_height;
+	cmd.bmp.bpp = 32;
+	cmd.bmp.width = context->icon_width;
+	cmd.bmp.height = context->icon_height;
+	cmd.bmp.bitmapDataLength = Stream_GetPosition(s);
+	cmd.bmp.bitmapData = Stream_Buffer(s);
+	update->SurfaceBits(update->context, &cmd);
 	context->icon_x = x;
 	context->icon_y = y;
 	test_peer_end_frame(client);
@@ -462,7 +466,7 @@ BOOL tf_peer_dump_rfx(freerdp_peer* client)
 	return TRUE;
 }
 
-static void* tf_debug_channel_thread_func(void* arg)
+static DWORD WINAPI tf_debug_channel_thread_func(LPVOID arg)
 {
 	void* fd;
 	wStream* s;
@@ -478,7 +482,7 @@ static void* tf_debug_channel_thread_func(void* arg)
 		WTSFreeMemory(buffer);
 
 		if (!(context->event = CreateWaitObjectEvent(NULL, TRUE, FALSE, fd)))
-			return NULL;
+			return 0;
 	}
 
 	s = Stream_New(NULL, 4096);
@@ -580,8 +584,7 @@ BOOL tf_peer_post_connect(freerdp_peer* client)
 			}
 
 			if (!(context->debug_channel_thread = CreateThread(NULL, 0,
-			                                      (LPTHREAD_START_ROUTINE) tf_debug_channel_thread_func, (void*) context, 0,
-			                                      NULL)))
+			                                      tf_debug_channel_thread_func, (void*) context, 0, NULL)))
 			{
 				WLog_ERR(TAG, "Failed to create debug channel thread");
 				CloseHandle(context->stopEvent);
@@ -631,6 +634,7 @@ BOOL tf_peer_activate(freerdp_peer* client)
 
 BOOL tf_peer_synchronize_event(rdpInput* input, UINT32 flags)
 {
+	WINPR_UNUSED(input);
 	WLog_DBG(TAG, "Client sent a synchronize event (flags:0x%"PRIX32")", flags);
 	return TRUE;
 }
@@ -697,6 +701,7 @@ BOOL tf_peer_keyboard_event(rdpInput* input, UINT16 flags, UINT16 code)
 
 BOOL tf_peer_unicode_keyboard_event(rdpInput* input, UINT16 flags, UINT16 code)
 {
+	WINPR_UNUSED(input);
 	WLog_DBG(TAG, "Client sent a unicode keyboard event (flags:0x%04"PRIX16" code:0x%04"PRIX16")",
 	         flags, code);
 	return TRUE;
@@ -704,6 +709,7 @@ BOOL tf_peer_unicode_keyboard_event(rdpInput* input, UINT16 flags, UINT16 code)
 
 BOOL tf_peer_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y)
 {
+	WINPR_UNUSED(flags);
 	//WLog_DBG(TAG, "Client sent a mouse event (flags:0x%04"PRIX16" pos:%"PRIu16",%"PRIu16")", flags, x, y);
 	test_peer_draw_icon(input->context->peer, x + 10, y);
 	return TRUE;
@@ -712,7 +718,9 @@ BOOL tf_peer_mouse_event(rdpInput* input, UINT16 flags, UINT16 x, UINT16 y)
 BOOL tf_peer_extended_mouse_event(rdpInput* input, UINT16 flags, UINT16 x,
                                   UINT16 y)
 {
+	WINPR_UNUSED(flags);
 	//WLog_DBG(TAG, "Client sent an extended mouse event (flags:0x%04"PRIX16" pos:%"PRIu16",%"PRIu16")", flags, x, y);
+	test_peer_draw_icon(input->context->peer, x + 10, y);
 	return TRUE;
 }
 
@@ -720,6 +728,7 @@ static BOOL tf_peer_refresh_rect(rdpContext* context, BYTE count,
                                  const RECTANGLE_16* areas)
 {
 	BYTE i;
+	WINPR_UNUSED(context);
 	WLog_DBG(TAG, "Client requested to refresh:");
 
 	for (i = 0; i < count; i++)
@@ -734,9 +743,12 @@ static BOOL tf_peer_refresh_rect(rdpContext* context, BYTE count,
 static BOOL tf_peer_suppress_output(rdpContext* context, BYTE allow,
                                     const RECTANGLE_16* area)
 {
+	WINPR_UNUSED(context);
+
 	if (allow > 0)
 	{
-		WLog_DBG(TAG, "Client restore output (%"PRIu16", %"PRIu16") (%"PRIu16", %"PRIu16").", area->left, area->top,
+		WLog_DBG(TAG, "Client restore output (%"PRIu16", %"PRIu16") (%"PRIu16", %"PRIu16").", area->left,
+		         area->top,
 		         area->right, area->bottom);
 	}
 	else
@@ -747,7 +759,7 @@ static BOOL tf_peer_suppress_output(rdpContext* context, BYTE allow,
 	return TRUE;
 }
 
-static void* test_peer_mainloop(void* arg)
+static DWORD WINAPI test_peer_mainloop(LPVOID arg)
 {
 	HANDLE handles[32];
 	DWORD count;
@@ -758,7 +770,7 @@ static void* test_peer_mainloop(void* arg)
 	if (!test_peer_init(client))
 	{
 		freerdp_peer_free(client);
-		return NULL;
+		return 0;
 	}
 
 	/* Initialize the real server settings here */
@@ -771,7 +783,7 @@ static void* test_peer_mainloop(void* arg)
 	{
 		WLog_ERR(TAG, "Memory allocation failed (strdup)");
 		freerdp_peer_free(client);
-		return NULL;
+		return 0;
 	}
 
 	client->settings->RdpSecurity = TRUE;
@@ -835,15 +847,15 @@ static void* test_peer_mainloop(void* arg)
 	client->Disconnect(client);
 	freerdp_peer_context_free(client);
 	freerdp_peer_free(client);
-	return NULL;
+	return 0;
 }
 
 static BOOL test_peer_accepted(freerdp_listener* instance, freerdp_peer* client)
 {
 	HANDLE hThread;
+	WINPR_UNUSED(instance);
 
-	if (!(hThread = CreateThread(NULL, 0,
-	                             (LPTHREAD_START_ROUTINE) test_peer_mainloop, (void*) client, 0, NULL)))
+	if (!(hThread = CreateThread(NULL, 0, test_peer_mainloop, (void*) client, 0, NULL)))
 		return FALSE;
 
 	CloseHandle(hThread);
@@ -890,8 +902,9 @@ int main(int argc, char* argv[])
 	freerdp_listener* instance;
 	char* file;
 	char name[MAX_PATH];
-	int port = 3389, i;
+	long port = 3389, i;
 	BOOL localOnly = FALSE;
+	errno = 0;
 
 	for (i = 1; i < argc; i++)
 	{
@@ -908,7 +921,7 @@ int main(int argc, char* argv[])
 
 			port = strtol(arg, NULL, 10);
 
-			if ((port < 1) || (port > 0xFFFF))
+			if ((port < 1) || (port > 0xFFFF) || (errno != 0))
 				return -1;
 		}
 		else if (strcmp(arg, "--local-only"))
@@ -918,6 +931,7 @@ int main(int argc, char* argv[])
 	}
 
 	WTSRegisterWtsApiFunctionTable(FreeRDP_InitWtsApi());
+	winpr_InitializeSSL(WINPR_SSL_INIT_DEFAULT);
 	instance = freerdp_listener_new();
 
 	if (!instance)
@@ -932,7 +946,7 @@ int main(int argc, char* argv[])
 	}
 
 	/* Open the server socket and start listening. */
-	sprintf_s(name, sizeof(name), "tfreerdp-server.%d", port);
+	sprintf_s(name, sizeof(name), "tfreerdp-server.%ld", port);
 	file = GetKnownSubPath(KNOWN_PATH_TEMP, name);
 
 	if (!file)

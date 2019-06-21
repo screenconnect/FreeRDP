@@ -17,8 +17,8 @@
  * limitations under the License.
  */
 
-#ifndef __RFX_BITSTREAM_H
-#define __RFX_BITSTREAM_H
+#ifndef FREERDP_LIB_CODEC_RFX_BITSTREAM_H
+#define FREERDP_LIB_CODEC_RFX_BITSTREAM_H
 
 #include <freerdp/codec/rfx.h>
 
@@ -77,9 +77,16 @@ typedef struct _RFX_BITSTREAM RFX_BITSTREAM;
 			bs->byte_pos++; \
 		} \
 	} } while (0)
+#define rfx_bitstream_flush(bs) do { \
+	if (bs->bits_left != 8) \
+	{ \
+		int _nbits = 8 - bs->bits_left; \
+		rfx_bitstream_put_bits(bs, 0, _nbits); \
+	} \
+	} while(0)
 
 #define rfx_bitstream_eos(_bs) ((_bs)->byte_pos >= (_bs)->nbytes)
 #define rfx_bitstream_left(_bs) ((_bs)->byte_pos >= (_bs)->nbytes ? 0 : ((_bs)->nbytes - (_bs)->byte_pos - 1) * 8 + (_bs)->bits_left)
 #define rfx_bitstream_get_processed_bytes(_bs) ((_bs)->bits_left < 8 ? (_bs)->byte_pos + 1 : (_bs)->byte_pos)
 
-#endif /* __RFX_BITSTREAM_H */
+#endif /* FREERDP_LIB_CODEC_RFX_BITSTREAM_H */

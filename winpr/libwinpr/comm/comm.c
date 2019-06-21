@@ -129,7 +129,7 @@ static BOOL CommInitialized()
 }
 
 
-void CommLog_Print(int level, ...)
+void CommLog_Print(DWORD level, ...)
 {
 	if (!CommInitialized())
 		return;
@@ -425,10 +425,8 @@ BOOL GetCommState(HANDLE hFile, LPDCB lpDCB)
 		lpLocalDcb->fDtrControl = DTR_CONTROL_DISABLE;
 	}
 
-	lpLocalDcb->fDsrSensitivity = (handflow.ControlHandShake &
-	                               SERIAL_DSR_SENSITIVITY) != 0;
-	lpLocalDcb->fTXContinueOnXoff = (handflow.FlowReplace & SERIAL_XOFF_CONTINUE) !=
-	                                0;
+	lpLocalDcb->fDsrSensitivity = (handflow.ControlHandShake & SERIAL_DSR_SENSITIVITY) != 0;
+	lpLocalDcb->fTXContinueOnXoff = (handflow.FlowReplace & SERIAL_XOFF_CONTINUE) != 0;
 	lpLocalDcb->fOutX = (handflow.FlowReplace & SERIAL_AUTO_TRANSMIT) != 0;
 	lpLocalDcb->fInX = (handflow.FlowReplace & SERIAL_AUTO_RECEIVE) != 0;
 	lpLocalDcb->fErrorChar = (handflow.FlowReplace & SERIAL_ERROR_CHAR) != 0;
@@ -995,49 +993,6 @@ BOOL WaitCommEvent(HANDLE hFile, PDWORD lpEvtMask, LPOVERLAPPED lpOverlapped)
 	return FALSE;
 }
 
-
-/* Extended API */
-
-static BOOL _IsReservedCommDeviceName(LPCTSTR lpName)
-{
-	int i;
-
-	if (!CommInitialized())
-		return FALSE;
-
-	/* Serial ports, COM1-9 */
-	for (i = 1; i < 10; i++)
-	{
-		TCHAR genericName[5];
-
-		if (_stprintf_s(genericName, 5, _T("COM%d"), i) < 0)
-		{
-			return FALSE;
-		}
-
-		if (_tcscmp(genericName, lpName) == 0)
-			return TRUE;
-	}
-
-	/* Parallel ports, LPT1-9 */
-	for (i = 1; i < 10; i++)
-	{
-		TCHAR genericName[5];
-
-		if (_stprintf_s(genericName, 5, _T("LPT%d"), i) < 0)
-		{
-			return FALSE;
-		}
-
-		if (_tcscmp(genericName, lpName) == 0)
-			return TRUE;
-	}
-
-	/* FIXME: what about PRN ? */
-	return FALSE;
-}
-
-
 /**
  * Returns TRUE on success, FALSE otherwise. To get extended error
  * information, call GetLastError.
@@ -1063,15 +1018,6 @@ BOOL DefineCommDevice(/* DWORD dwFlags,*/ LPCTSTR lpDeviceName,
 	{
 		SetLastError(ERROR_DLL_INIT_FAILED);
 		goto error_handle;
-	}
-
-	if (_tcsncmp(lpDeviceName, _T("\\\\.\\"), 4) != 0)
-	{
-		if (!_IsReservedCommDeviceName(lpDeviceName))
-		{
-			SetLastError(ERROR_INVALID_DATA);
-			goto error_handle;
-		}
 	}
 
 	storedDeviceName = _tcsdup(lpDeviceName);
@@ -1258,7 +1204,23 @@ static HANDLE_OPS ops =
 	CommIsHandled,
 	CommCloseHandle,
 	CommGetFd,
-	NULL /* CleanupHandle */
+	NULL, /* CleanupHandle */
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL
 };
 
 
@@ -1472,12 +1434,7 @@ HANDLE CommCreateFileA(LPCSTR lpDeviceName, DWORD dwDesiredAccess,
 
 	return (HANDLE)pComm;
 error_handle:
-
-	if (pComm != NULL)
-	{
-		CloseHandle(pComm);
-	}
-
+	CloseHandle(pComm);
 	return INVALID_HANDLE_VALUE;
 }
 

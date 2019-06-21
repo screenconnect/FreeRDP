@@ -59,6 +59,14 @@ typedef RDP_CLIENT_ENTRY_POINTS_V1 RDP_CLIENT_ENTRY_POINTS;
 extern "C" {
 #endif
 
+/* Flags used by certificate callbacks */
+#define VERIFY_CERT_FLAG_NONE     0x00
+#define VERIFY_CERT_FLAG_LEGACY   0x02
+#define VERIFY_CERT_FLAG_REDIRECT 0x10
+#define VERIFY_CERT_FLAG_GATEWAY  0x20
+#define VERIFY_CERT_FLAG_CHANGED  0x40
+#define VERIFY_CERT_FLAG_MISMATCH 0x80
+
 typedef BOOL (*pContextNew)(freerdp* instance, rdpContext* context);
 typedef void (*pContextFree)(freerdp* instance, rdpContext* context);
 
@@ -71,6 +79,7 @@ typedef BOOL (*pAuthenticate)(freerdp* instance, char** username,
 /** @brief Callback used if user interaction is required to accept
  *         an unknown certificate.
  *
+ *  @deprecated Use pVerifyCertificateEx
  *  @param common_name      The certificate registered hostname.
  *  @param subject          The common name of the certificate.
  *  @param issuer           The issuer of the certificate.
@@ -89,8 +98,32 @@ typedef DWORD (*pVerifyCertificate)(freerdp* instance,
                                     BOOL host_mismatch);
 
 /** @brief Callback used if user interaction is required to accept
+ *         an unknown certificate.
+ *
+ *  @param host             The hostname connecting to.
+ *  @param port             The port connecting to.
+ *  @param common_name      The certificate registered hostname.
+ *  @param subject          The common name of the certificate.
+ *  @param issuer           The issuer of the certificate.
+ *  @param fingerprint      The fingerprint of the certificate.
+ *  @param flags            Flags of type VERIFY_CERT_FLAG*
+ *
+ *  @return 1 to accept and store a certificate, 2 to accept
+ *          a certificate only for this session, 0 otherwise.
+ */
+typedef DWORD (*pVerifyCertificateEx)(freerdp* instance,
+                                      const char* host,
+                                      UINT16 port,
+                                      const char* common_name,
+                                      const char* subject,
+                                      const char* issuer,
+                                      const char* fingerprint,
+                                      DWORD flags);
+
+/** @brief Callback used if user interaction is required to accept
  *         a changed certificate.
  *
+ *  @deprecated Use pVerifyChangedCertificateEx
  *  @param common_name      The certificate registered hostname.
  *  @param subject          The common name of the new certificate.
  *  @param issuer           The issuer of the new certificate.
@@ -111,9 +144,53 @@ typedef DWORD (*pVerifyChangedCertificate)(freerdp* instance,
         const char* old_subject,
         const char* old_issuer,
         const char* old_fingerprint);
-typedef int (*pVerifyX509Certificate)(freerdp* instance, BYTE* data,
-                                      int length, const char* hostname,
-                                      int port, DWORD flags);
+
+/** @brief Callback used if user interaction is required to accept
+ *         a changed certificate.
+ *
+ *  @param host             The hostname connecting to.
+ *  @param port             The port connecting to.
+ *  @param common_name      The certificate registered hostname.
+ *  @param subject          The common name of the new certificate.
+ *  @param issuer           The issuer of the new certificate.
+ *  @param fingerprint      The fingerprint of the new certificate.
+ *  @param old_subject      The common name of the old certificate.
+ *  @param old_issuer       The issuer of the new certificate.
+ *  @param old_fingerprint  The fingerprint of the old certificate.
+ *  @param flags            Flags of type VERIFY_CERT_FLAG*
+ *
+ *  @return 1 to accept and store a certificate, 2 to accept
+ *          a certificate only for this session, 0 otherwise.
+ */
+
+typedef DWORD (*pVerifyChangedCertificateEx)(freerdp* instance,
+        const char* host,
+        UINT16 port,
+        const char* common_name,
+        const char* subject,
+        const char* issuer,
+        const char* new_fingerprint,
+        const char* old_subject,
+        const char* old_issuer,
+        const char* old_fingerprint,
+        DWORD flags);
+
+/** @brief Callback used if user interaction is required to accept
+ *         a certificate.
+ *
+ *  @param instance         Pointer to the freerdp instance.
+ *  @param data             Pointer to certificate data in PEM format.
+ *  @param length           The length of the certificate data.
+ *  @param hostname         The hostname connecting to.
+ *  @param port             The port connecting to.
+ *  @param flags            Flags of type VERIFY_CERT_FLAG*
+ *
+ *  @return 1 to accept and store a certificate, 2 to accept
+ *          a certificate only for this session, 0 otherwise.
+ */
+typedef int (*pVerifyX509Certificate)(freerdp* instance, const BYTE* data,
+                                      size_t length, const char* hostname,
+                                      UINT16 port, DWORD flags);
 
 typedef int (*pLogonErrorInfo)(freerdp* instance, UINT32 data, UINT32 type);
 
@@ -121,6 +198,9 @@ typedef int (*pSendChannelData)(freerdp* instance, UINT16 channelId, BYTE* data,
                                 int size);
 typedef int (*pReceiveChannelData)(freerdp* instance, UINT16 channelId,
                                    BYTE* data, int size, int flags, int totalSize);
+
+typedef BOOL (*pPresentGatewayMessage)(freerdp* instance, UINT32 type, BOOL isDisplayMandatory,
+                                       BOOL isConsentMandatory, size_t length, const WCHAR* message);
 
 /**
  * Defines the context for a given instance of RDP connection.
@@ -179,10 +259,25 @@ struct rdp_context
 	ALIGN64 rdpCodecs* codecs; /* 42 */
 	ALIGN64 rdpAutoDetect* autodetect; /* 43 */
 	ALIGN64 HANDLE abortEvent; /* 44 */
-	UINT64 paddingC[64 - 45]; /* 45 */
+	ALIGN64 int  disconnectUltimatum; /* 45 */
+	UINT64 paddingC[64 - 46]; /* 46 */
 
 	UINT64 paddingD[96 - 64]; /* 64 */
 	UINT64 paddingE[128 - 96]; /* 96 */
+};
+
+/**
+ *  Defines the possible disconnect reasons in the MCS Disconnect Provider
+ *  Ultimatum PDU
+ */
+
+enum Disconnect_Ultimatum
+{
+	Disconnect_Ultimatum_domain_disconnected = 0,
+	Disconnect_Ultimatum_provider_initiated = 1,
+	Disconnect_Ultimatum_token_purged = 2,
+	Disconnect_Ultimatum_user_requested = 3,
+	Disconnect_Ultimatum_channel_purged = 4
 };
 
 #include <freerdp/client.h>
@@ -240,7 +335,9 @@ struct rdp_freerdp
 								   Callback for context deallocation
 								   Can be set before calling freerdp_context_free() to have it executed before deallocation.
 								   Must be set to NULL if not needed. */
-	UINT64 paddingC[48 - 35]; /* 35 */
+	UINT64 paddingC[47 - 35]; /* 35 */
+
+	ALIGN64 UINT ConnectionCallbackState; /* 47 */
 
 	ALIGN64 pPreConnect PreConnect; /**< (offset 48)
 								 Callback for pre-connect operations.
@@ -257,11 +354,12 @@ struct rdp_freerdp
 									 It is used to get the username/password when it was not provided at connection time. */
 	ALIGN64 pVerifyCertificate VerifyCertificate; /**< (offset 51)
 											   Callback for certificate validation.
-											   Used to verify that an unknown certificate is trusted. */
+											   Used to verify that an unknown certificate is trusted.
+ DEPRECATED: Use VerifyChangedCertificateEx*/
 	ALIGN64 pVerifyChangedCertificate VerifyChangedCertificate; /**< (offset 52)
 															 Callback for changed certificate validation.
 															 Used when a certificate differs from stored fingerprint.
-															 If returns TRUE, the new fingerprint will be trusted and old thrown out. */
+ DEPRECATED: Use VerifyChangedCertificateEx */
 
 	ALIGN64 pVerifyX509Certificate
 	VerifyX509Certificate;  /**< (offset 53)  Callback for X509 certificate verification (PEM format) */
@@ -277,7 +375,11 @@ struct rdp_freerdp
 									 Callback for gateway authentication.
 									 It is used to get the username/password when it was not provided at connection time. */
 
-	UINT64 paddingD[64 - 57]; /* 57 */
+	ALIGN64 pPresentGatewayMessage PresentGatewayMessage;/**< (offset 57)
+									 Callback for gateway consent messages.
+									 It is used to present consent messages to the user. */
+
+	UINT64 paddingD[64 - 58]; /* 58 */
 
 	ALIGN64 pSendChannelData SendChannelData; /* (offset 64)
 										 Callback for sending data to a channel.
@@ -288,7 +390,13 @@ struct rdp_freerdp
 											   This is called by freerdp_channel_process() (if not NULL).
 											   Clients will typically use a function that calls freerdp_channels_data() to perform the needed tasks. */
 
-	UINT64 paddingE[80 - 66]; /* 66 */
+	ALIGN64 pVerifyCertificateEx VerifyCertificateEx; /**< (offset 66)
+											   Callback for certificate validation.
+											   Used to verify that an unknown certificate is trusted. */
+	ALIGN64 pVerifyChangedCertificateEx VerifyChangedCertificateEx; /**< (offset 67)
+															 Callback for changed certificate validation.
+															 Used when a certificate differs from stored fingerprint. */
+	UINT64 paddingE[80 - 68]; /* 68 */
 };
 
 struct rdp_channel_handles
@@ -305,6 +413,8 @@ FREERDP_API BOOL freerdp_connect(freerdp* instance);
 FREERDP_API BOOL freerdp_abort_connect(freerdp* instance);
 FREERDP_API BOOL freerdp_shall_disconnect(freerdp* instance);
 FREERDP_API BOOL freerdp_disconnect(freerdp* instance);
+
+FREERDP_API BOOL freerdp_disconnect_before_reconnect(freerdp* instance);
 FREERDP_API BOOL freerdp_reconnect(freerdp* instance);
 
 FREERDP_API UINT freerdp_channel_add_init_handle_data(rdpChannelHandles* handles, void* pInitHandle,
@@ -343,6 +453,7 @@ FREERDP_API int freerdp_message_queue_process_pending_messages(
 
 FREERDP_API UINT32 freerdp_error_info(freerdp* instance);
 FREERDP_API void freerdp_set_error_info(rdpRdp* rdp, UINT32 error);
+FREERDP_API BOOL freerdp_send_error_info(rdpRdp* rdp);
 
 FREERDP_API void freerdp_get_version(int* major, int* minor, int* revision);
 FREERDP_API const char* freerdp_get_version_string(void);
@@ -351,11 +462,12 @@ FREERDP_API const char* freerdp_get_build_revision(void);
 FREERDP_API const char* freerdp_get_build_config(void);
 
 FREERDP_API freerdp* freerdp_new(void);
-
 FREERDP_API void freerdp_free(freerdp* instance);
 
 FREERDP_API BOOL freerdp_focus_required(freerdp* instance);
 FREERDP_API void freerdp_set_focus(freerdp* instance);
+
+FREERDP_API int freerdp_get_disconnect_ultimatum(rdpContext* context);
 
 FREERDP_API UINT32 freerdp_get_last_error(rdpContext* context);
 FREERDP_API const char* freerdp_get_last_error_name(UINT32 error);
@@ -368,6 +480,9 @@ FREERDP_API const char* freerdp_get_logon_error_info_data(UINT32 data);
 FREERDP_API ULONG freerdp_get_transport_sent(rdpContext* context,
         BOOL resetCount);
 
+FREERDP_API BOOL freerdp_nla_impersonate(rdpContext* context);
+FREERDP_API BOOL freerdp_nla_revert_to_self(rdpContext* context);
+
 FREERDP_API void clearChannelError(rdpContext* context);
 FREERDP_API HANDLE getChannelErrorEventHandle(rdpContext* context);
 FREERDP_API UINT getChannelError(rdpContext* context);
@@ -375,6 +490,8 @@ FREERDP_API const char* getChannelErrorDescription(rdpContext* context);
 FREERDP_API void setChannelError(rdpContext* context, UINT errorNum,
                                  char* description);
 FREERDP_API BOOL checkChannelErrorEvent(rdpContext* context);
+
+FREERDP_API const char* freerdp_nego_get_routing_token(rdpContext* context, DWORD* length);
 
 #ifdef __cplusplus
 }

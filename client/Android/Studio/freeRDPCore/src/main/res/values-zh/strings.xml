@@ -113,7 +113,6 @@
     <string name="settings_remote_program">远程程序</string>
     <string name="settings_work_dir">工作目录</string>
     <string name="settings_async_channel">Async channel</string>
-    <string name="settings_async_transport">Async transport</string>
     <string name="settings_async_input">Async input</string>
     <string name="settings_async_update">Async update</string>
     <string name="settings_console_mode">控制台模式</string>
@@ -122,6 +121,7 @@
     <string name="settings_password_empty">未设置</string>
     <string name="settings_cat_ui">用户界面</string>
     <string name="settings_ui_hide_status_bar">隐藏状态栏</string>
+    <string name="settings_ui_hide_action_bar">隱藏操作欄</string>
     <string name="settings_ui_hide_zoom_controls">隐藏缩放控件</string>
     <string name="settings_ui_swap_mouse_buttons">交换鼠标左右键</string>
     <string name="settings_ui_invert_scrolling">翻转滚动</string>

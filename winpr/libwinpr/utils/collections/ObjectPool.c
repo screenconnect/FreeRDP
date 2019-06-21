@@ -51,7 +51,7 @@ void* ObjectPool_Take(wObjectPool* pool)
 	if (!obj)
 	{
 		if (pool->object.fnObjectNew)
-			obj = pool->object.fnObjectNew();
+			obj = pool->object.fnObjectNew(NULL);
 	}
 
 	if (pool->object.fnObjectInit)
@@ -129,7 +129,7 @@ wObjectPool* ObjectPool_New(BOOL synchronized)
 	{
 		pool->capacity = 32;
 		pool->size = 0;
-		pool->array = (void**) malloc(sizeof(void*) * pool->capacity);
+		pool->array = (void**) calloc(pool->capacity, sizeof(void*));
 		if (!pool->array)
 		{
 			free(pool);

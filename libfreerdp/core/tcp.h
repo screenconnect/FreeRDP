@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef __TCP_H
-#define __TCP_H
+#ifndef FREERDP_LIB_CORE_TCP_H
+#define FREERDP_LIB_CORE_TCP_H
 
 #include <winpr/windows.h>
 
@@ -67,4 +67,10 @@ FREERDP_LOCAL int freerdp_tcp_connect(rdpContext* context,
                                       rdpSettings* settings,
                                       const char* hostname, int port, int timeout);
 
-#endif /* __TCP_H */
+FREERDP_LOCAL char* freerdp_tcp_get_peer_address(SOCKET sockfd);
+
+FREERDP_LOCAL struct addrinfo* freerdp_tcp_resolve_host(const char* hostname, int port,
+        int ai_flags);
+FREERDP_LOCAL char* freerdp_tcp_address_to_string(const struct sockaddr_storage* addr, BOOL* pIPv6);
+
+#endif /* FREERDP_LIB_CORE_TCP_H */

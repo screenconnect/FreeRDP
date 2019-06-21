@@ -51,7 +51,7 @@
 DWORD GetCurrentDirectoryA(DWORD nBufferLength, LPSTR lpBuffer)
 {
 	char* cwd;
-	int length;
+	size_t length;
 
 	cwd = getcwd(NULL, 0);
 
@@ -139,7 +139,7 @@ BOOL NeedCurrentDirectoryForExePathW(LPCWSTR ExeName)
 DWORD GetEnvironmentVariableA(LPCSTR lpName, LPSTR lpBuffer, DWORD nSize)
 {
 #if !defined(_UWP)
-	int length;
+	size_t length;
 	char* env = NULL;
 
 	env = getenv(lpName);
@@ -231,7 +231,7 @@ LPCH GetEnvironmentStringsA(VOID)
 	envp = environ;
 
 	cchEnvironmentBlock = 128;
-	lpszEnvironmentBlock = (LPCH) malloc(cchEnvironmentBlock * sizeof(CHAR));
+	lpszEnvironmentBlock = (LPCH) calloc(cchEnvironmentBlock, sizeof(CHAR));
 	if (!lpszEnvironmentBlock)
 		return NULL;
 
@@ -365,7 +365,7 @@ LPCH MergeEnvironmentStrings(PCSTR original, PCSTR merge)
 	offset = 0;
 
 	cchEnvironmentBlock = 128;
-	lpszEnvironmentBlock = (LPCH) malloc(cchEnvironmentBlock * sizeof(CHAR));
+	lpszEnvironmentBlock = (LPCH) calloc(cchEnvironmentBlock, sizeof(CHAR));
 
 	if (!lpszEnvironmentBlock)
 	{

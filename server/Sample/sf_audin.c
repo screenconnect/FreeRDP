@@ -29,14 +29,9 @@
 
 #include "sf_audin.h"
 
+#include <freerdp/server/server-common.h>
 #include <freerdp/log.h>
 #define TAG SERVER_TAG("sample")
-
-static const AUDIO_FORMAT test_audio_formats[] =
-{
-	{ WAVE_FORMAT_PCM, 2, 44100, 176400, 4, 16, 0, NULL },
-	{ WAVE_FORMAT_ALAW, 2, 22050, 44100, 2, 8, 0, NULL }
-};
 
 /**
  * Function description
@@ -58,6 +53,8 @@ static UINT sf_peer_audin_opening(audin_server_context* context)
  */
 static UINT sf_peer_audin_open_result(audin_server_context* context, UINT32 result)
 {
+	/* TODO: Implement */
+	WLog_WARN(TAG, "%s not implemented", __FUNCTION__);
 	WLog_DBG(TAG, "AUDIN open result %"PRIu32".", result);
 	return CHANNEL_RC_OK;
 }
@@ -67,9 +64,13 @@ static UINT sf_peer_audin_open_result(audin_server_context* context, UINT32 resu
  *
  * @return 0 on success, otherwise a Win32 error code
  */
-static UINT sf_peer_audin_receive_samples(audin_server_context* context, const void* buf, int nframes)
+static UINT sf_peer_audin_receive_samples(audin_server_context* context,
+        const AUDIO_FORMAT* format, wStream* buf,
+        size_t nframes)
 {
-	WLog_DBG(TAG, "AUDIN receive %d frames.", nframes);
+	/* TODO: Implement */
+	WLog_WARN(TAG, "%s not implemented", __FUNCTION__);
+	WLog_DBG(TAG, "%s receive %"PRIdz" frames.", __FUNCTION__, nframes);
 	return CHANNEL_RC_OK;
 }
 
@@ -78,15 +79,10 @@ void sf_peer_audin_init(testPeerContext* context)
 	context->audin = audin_server_context_new(context->vcm);
 	context->audin->rdpcontext = &context->_p;
 	context->audin->data = context;
+	context->audin->num_server_formats = server_audin_get_formats(&context->audin->server_formats);
 
-	context->audin->server_formats = test_audio_formats;
-	context->audin->num_server_formats =
-			sizeof(test_audio_formats) / sizeof(test_audio_formats[0]);
-
-	context->audin->dst_format.wFormatTag = 1;
-	context->audin->dst_format.nChannels = 2;
-	context->audin->dst_format.nSamplesPerSec = 44100;
-	context->audin->dst_format.wBitsPerSample = 16;
+	if (context->audin->num_server_formats > 0)
+		context->audin->dst_format = &context->audin->server_formats[0];
 
 	context->audin->Opening = sf_peer_audin_opening;
 	context->audin->OpenResult = sf_peer_audin_open_result;

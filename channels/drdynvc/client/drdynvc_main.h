@@ -19,8 +19,8 @@
  * limitations under the License.
  */
 
-#ifndef __DRDYNVC_MAIN_H
-#define __DRDYNVC_MAIN_H
+#ifndef FREERDP_CHANNEL_DRDYNVC_CLIENT_MAIN_H
+#define FREERDP_CHANNEL_DRDYNVC_CLIENT_MAIN_H
 
 #include <winpr/wlog.h>
 #include <winpr/synch.h>
@@ -127,7 +127,7 @@ struct drdynvc_plugin
 	DRDYNVC_STATE state;
 	DrdynvcClientContext* context;
 
-	int version;
+	UINT16 version;
 	int PriorityCharge0;
 	int PriorityCharge1;
 	int PriorityCharge2;
@@ -137,4 +137,4 @@ struct drdynvc_plugin
 	IWTSVirtualChannelManager* channel_mgr;
 };
 
-#endif
+#endif /* FREERDP_CHANNEL_DRDYNVC_CLIENT_MAIN_H */

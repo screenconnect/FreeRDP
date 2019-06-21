@@ -969,7 +969,7 @@ static INLINE int progressive_rfx_upgrade_block(RFX_PROGRESSIVE_UPGRADE_STATE* s
         INT16* buffer,	INT16* sign, UINT32 length,
         UINT32 shift, UINT32 bitPos, UINT32 numBits)
 {
-	int index;
+	UINT32 index;
 	INT16 input;
 	wBitStream* raw;
 
@@ -1684,15 +1684,19 @@ INT32 progressive_decompress(PROGRESSIVE_CONTEXT* progressive,
 
 				if (region->numRects > progressive->cRects)
 				{
-					progressive->rects = (RFX_RECT*) realloc(progressive->rects,
-					                     region->numRects * sizeof(RFX_RECT));
+					RFX_RECT* tmpBuf = (RFX_RECT*) realloc(progressive->rects,
+					               region->numRects * sizeof(RFX_RECT));
+					if (!tmpBuf)
+						return -1016;
+
+					progressive->rects = tmpBuf;
 					progressive->cRects = region->numRects;
 				}
 
 				region->rects = progressive->rects;
 
 				if (!region->rects)
-					return -1016;
+					return -1017;
 
 				for (index = 0; index < region->numRects; index++)
 				{
@@ -1705,20 +1709,24 @@ INT32 progressive_decompress(PROGRESSIVE_CONTEXT* progressive,
 				}
 
 				if ((blockLen - boffset) < (region->numQuant * 5))
-					return -1017;
+					return -1018;
 
 				if (region->numQuant > progressive->cQuant)
 				{
-					progressive->quantVals = (RFX_COMPONENT_CODEC_QUANT*) realloc(
+					RFX_COMPONENT_CODEC_QUANT* tmpBuf = (RFX_COMPONENT_CODEC_QUANT*) realloc(
 					                             progressive->quantVals,
 					                             region->numQuant * sizeof(RFX_COMPONENT_CODEC_QUANT));
+					if (!tmpBuf)
+						return -1019;
+
+					progressive->quantVals = tmpBuf;
 					progressive->cQuant = region->numQuant;
 				}
 
 				region->quantVals = progressive->quantVals;
 
 				if (!region->quantVals)
-					return -1018;
+					return -1020;
 
 				for (index = 0; index < region->numQuant; index++)
 				{
@@ -1734,20 +1742,24 @@ INT32 progressive_decompress(PROGRESSIVE_CONTEXT* progressive,
 				}
 
 				if ((blockLen - boffset) < (region->numProgQuant * 16))
-					return -1019;
+					return -1021;
 
 				if (region->numProgQuant > progressive->cProgQuant)
 				{
-					progressive->quantProgVals = (RFX_PROGRESSIVE_CODEC_QUANT*) realloc(
+					RFX_PROGRESSIVE_CODEC_QUANT* tmpBuf = (RFX_PROGRESSIVE_CODEC_QUANT*) realloc(
 					                                 progressive->quantProgVals,
 					                                 region->numProgQuant * sizeof(RFX_PROGRESSIVE_CODEC_QUANT));
+					if (!tmpBuf)
+						return -1022;
+
+					progressive->quantProgVals = tmpBuf;
 					progressive->cProgQuant = region->numProgQuant;
 				}
 
 				region->quantProgVals = progressive->quantProgVals;
 
 				if (!region->quantProgVals)
-					return -1020;
+					return -1023;
 
 				for (index = 0; index < region->numProgQuant; index++)
 				{
@@ -1763,12 +1775,16 @@ INT32 progressive_decompress(PROGRESSIVE_CONTEXT* progressive,
 				}
 
 				if ((blockLen - boffset) < region->tileDataSize)
-					return -1021;
+					return -1024;
 
 				if (progressive->cTiles < surface->gridSize)
 				{
-					progressive->tiles = (RFX_PROGRESSIVE_TILE**) realloc(progressive->tiles,
+					RFX_PROGRESSIVE_TILE** tmpBuf = (RFX_PROGRESSIVE_TILE**) realloc(progressive->tiles,
 					                     surface->gridSize * sizeof(RFX_PROGRESSIVE_TILE*));
+					if (!tmpBuf)
+						return -1025;
+
+					progressive->tiles = tmpBuf;
 					progressive->cTiles = surface->gridSize;
 				}
 
@@ -1938,28 +1954,28 @@ PROGRESSIVE_CONTEXT* progressive_context_new(BOOL Compressor)
 		progressive->Compressor = Compressor;
 		progressive->bufferPool = BufferPool_New(TRUE, (8192 + 32) * 3, 16);
 		progressive->cRects = 64;
-		progressive->rects = (RFX_RECT*) malloc(progressive->cRects * sizeof(RFX_RECT));
+		progressive->rects = (RFX_RECT*) calloc(progressive->cRects, sizeof(RFX_RECT));
 
 		if (!progressive->rects)
 			goto cleanup;
 
 		progressive->cTiles = 64;
-		progressive->tiles = (RFX_PROGRESSIVE_TILE**) malloc(progressive->cTiles *
+		progressive->tiles = (RFX_PROGRESSIVE_TILE**) calloc(progressive->cTiles,
 		                     sizeof(RFX_PROGRESSIVE_TILE*));
 
 		if (!progressive->tiles)
 			goto cleanup;
 
 		progressive->cQuant = 8;
-		progressive->quantVals = (RFX_COMPONENT_CODEC_QUANT*) malloc(
-		                             progressive->cQuant * sizeof(RFX_COMPONENT_CODEC_QUANT));
+		progressive->quantVals = (RFX_COMPONENT_CODEC_QUANT*) calloc(
+		                             progressive->cQuant, sizeof(RFX_COMPONENT_CODEC_QUANT));
 
 		if (!progressive->quantVals)
 			goto cleanup;
 
 		progressive->cProgQuant = 8;
-		progressive->quantProgVals = (RFX_PROGRESSIVE_CODEC_QUANT*) malloc(
-		                                 progressive->cProgQuant * sizeof(RFX_PROGRESSIVE_CODEC_QUANT));
+		progressive->quantProgVals = (RFX_PROGRESSIVE_CODEC_QUANT*) calloc(
+		                                 progressive->cProgQuant, sizeof(RFX_PROGRESSIVE_CODEC_QUANT));
 
 		if (!progressive->quantProgVals)
 			goto cleanup;

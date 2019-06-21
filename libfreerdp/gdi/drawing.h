@@ -19,8 +19,8 @@
  * limitations under the License.
  */
 
-#ifndef FREERDP_GDI_DRAWING_H
-#define FREERDP_GDI_DRAWING_H
+#ifndef FREERDP_LIB_GDI_DRAWING_H
+#define FREERDP_LIB_GDI_DRAWING_H
 
 #include <freerdp/api.h>
 #include <freerdp/gdi/gdi.h>
@@ -29,16 +29,16 @@
 extern "C" {
 #endif
 
-FREERDP_LOCAL UINT32 gdi_GetROP2(HGDI_DC hdc);
-FREERDP_LOCAL UINT32 gdi_SetROP2(HGDI_DC hdc, int fnDrawMode);
+FREERDP_LOCAL INT32 gdi_GetROP2(HGDI_DC hdc);
+FREERDP_LOCAL INT32 gdi_SetROP2(HGDI_DC hdc, INT32 fnDrawMode);
 FREERDP_LOCAL UINT32 gdi_GetBkColor(HGDI_DC hdc);
 FREERDP_LOCAL UINT32 gdi_SetBkColor(HGDI_DC hdc, UINT32 crColor);
 FREERDP_LOCAL UINT32 gdi_GetBkMode(HGDI_DC hdc);
-FREERDP_LOCAL BOOL gdi_SetBkMode(HGDI_DC hdc, int iBkMode);
+FREERDP_LOCAL INT32 gdi_SetBkMode(HGDI_DC hdc, INT32 iBkMode);
 FREERDP_LOCAL UINT32 gdi_SetTextColor(HGDI_DC hdc, UINT32 crColor);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* FREERDP_GDI_DRAWING_H */
+#endif /* FREERDP_LIB_GDI_DRAWING_H */

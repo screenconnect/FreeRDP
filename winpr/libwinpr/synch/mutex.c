@@ -24,6 +24,7 @@
 #include <winpr/synch.h>
 #include <winpr/debug.h>
 #include <winpr/wlog.h>
+#include <winpr/string.h>
 
 #include "synch.h"
 
@@ -53,7 +54,8 @@ static BOOL MutexIsHandled(HANDLE handle)
 
 static int MutexGetFd(HANDLE handle)
 {
-	WINPR_MUTEX *mux = (WINPR_MUTEX *)handle;
+	WINPR_MUTEX* mux = (WINPR_MUTEX*)handle;
+
 	if (!MutexIsHandled(handle))
 		return -1;
 
@@ -77,17 +79,18 @@ BOOL MutexCloseHandle(HANDLE handle)
 		{
 			size_t used = 0, i;
 			void* stack = winpr_backtrace(20);
-			char **msg = NULL;
+			char** msg = NULL;
 
 			if (stack)
 				msg = winpr_backtrace_symbols(stack, &used);
 
 			if (msg)
 			{
-				for(i=0; i<used; i++)
+				for (i = 0; i < used; i++)
 					WLog_ERR(TAG, "%2"PRIdz": %s", i, msg[i]);
 			}
-			free (msg);
+
+			free(msg);
 			winpr_backtrace_free(stack);
 		}
 #endif
@@ -97,8 +100,8 @@ BOOL MutexCloseHandle(HANDLE handle)
 		 */
 	}
 
+	free(mutex->name);
 	free(handle);
-
 	return TRUE;
 }
 
@@ -107,15 +110,51 @@ static HANDLE_OPS ops =
 	MutexIsHandled,
 	MutexCloseHandle,
 	MutexGetFd,
-	NULL /* CleanupHandle */
+	NULL, /* CleanupHandle */
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL
 };
 
 HANDLE CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCWSTR lpName)
 {
+	HANDLE handle;
+	char* name = NULL;
+
+	if (lpName)
+	{
+		int rc = ConvertFromUnicode(CP_UTF8, 0, lpName, -1, &name, 0, NULL, NULL);
+
+		if (rc < 0)
+			return NULL;
+	}
+
+	handle = CreateMutexA(lpMutexAttributes, bInitialOwner, name);
+	free(name);
+	return handle;
+}
+
+HANDLE CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName)
+{
 	HANDLE handle = NULL;
 	WINPR_MUTEX* mutex;
-
 	mutex = (WINPR_MUTEX*) calloc(1, sizeof(WINPR_MUTEX));
+
+	if (lpMutexAttributes)
+		WLog_WARN(TAG, "%s [%s] does not support lpMutexAttributes", __FUNCTION__, lpName);
 
 	if (mutex)
 	{
@@ -123,41 +162,69 @@ HANDLE CreateMutexW(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner,
 		pthread_mutexattr_init(&attr);
 		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
 		pthread_mutex_init(&mutex->mutex, &attr);
-
 		WINPR_HANDLE_SET_TYPE_AND_MODE(mutex, HANDLE_TYPE_MUTEX, WINPR_FD_READ);
 		mutex->ops = &ops;
-
 		handle = (HANDLE) mutex;
 
 		if (bInitialOwner)
 			pthread_mutex_lock(&mutex->mutex);
+
+		if (lpName)
+			mutex->name = strdup(lpName); /* Non runtime relevant information, skip NULL check */
 	}
 
 	return handle;
 }
 
-HANDLE CreateMutexA(LPSECURITY_ATTRIBUTES lpMutexAttributes, BOOL bInitialOwner, LPCSTR lpName)
+HANDLE CreateMutexExA(LPSECURITY_ATTRIBUTES lpMutexAttributes, LPCSTR lpName, DWORD dwFlags,
+                      DWORD dwDesiredAccess)
 {
-	return CreateMutexW(lpMutexAttributes, bInitialOwner, NULL);
+	BOOL initial = FALSE;
+	/* TODO: support access modes */
+
+	if (dwDesiredAccess != 0)
+		WLog_WARN(TAG, "%s [%s] does not support dwDesiredAccess 0x%08"PRIx32, __FUNCTION__, lpName,
+		          dwDesiredAccess);
+
+	if (dwFlags & CREATE_MUTEX_INITIAL_OWNER)
+		initial = TRUE;
+
+	return CreateMutexA(lpMutexAttributes, initial, lpName);
 }
 
-HANDLE CreateMutexExA(LPSECURITY_ATTRIBUTES lpMutexAttributes, LPCTSTR lpName, DWORD dwFlags, DWORD dwDesiredAccess)
+HANDLE CreateMutexExW(LPSECURITY_ATTRIBUTES lpMutexAttributes, LPCWSTR lpName, DWORD dwFlags,
+                      DWORD dwDesiredAccess)
 {
-	return CreateMutexW(lpMutexAttributes, FALSE, NULL);
+	BOOL initial = FALSE;
+
+	/* TODO: support access modes */
+	if (dwDesiredAccess != 0)
+		WLog_WARN(TAG, "%s [%s] does not support dwDesiredAccess 0x%08"PRIx32, __FUNCTION__, lpName,
+		          dwDesiredAccess);
+
+	if (dwFlags & CREATE_MUTEX_INITIAL_OWNER)
+		initial = TRUE;
+
+	return CreateMutexW(lpMutexAttributes, initial, lpName);
 }
 
-HANDLE CreateMutexExW(LPSECURITY_ATTRIBUTES lpMutexAttributes, LPCWSTR lpName, DWORD dwFlags, DWORD dwDesiredAccess)
+HANDLE OpenMutexA(DWORD dwDesiredAccess, BOOL bInheritHandle, LPCSTR lpName)
 {
-	return CreateMutexW(lpMutexAttributes, FALSE, NULL);
-}
-
-HANDLE OpenMutexA(DWORD dwDesiredAccess, BOOL bInheritHandle,LPCSTR lpName)
-{
+	/* TODO: Implement */
+	WINPR_UNUSED(dwDesiredAccess);
+	WINPR_UNUSED(bInheritHandle);
+	WINPR_UNUSED(lpName);
+	WLog_ERR(TAG, "%s not implemented", __FUNCTION__);
 	return NULL;
 }
 
-HANDLE OpenMutexW(DWORD dwDesiredAccess, BOOL bInheritHandle,LPCWSTR lpName)
+HANDLE OpenMutexW(DWORD dwDesiredAccess, BOOL bInheritHandle, LPCWSTR lpName)
 {
+	/* TODO: Implement */
+	WINPR_UNUSED(dwDesiredAccess);
+	WINPR_UNUSED(bInheritHandle);
+	WINPR_UNUSED(lpName);
+	WLog_ERR(TAG, "%s not implemented", __FUNCTION__);
 	return NULL;
 }
 
@@ -173,11 +240,13 @@ BOOL ReleaseMutex(HANDLE hMutex)
 	{
 		WINPR_MUTEX* mutex = (WINPR_MUTEX*) Object;
 		int rc = pthread_mutex_unlock(&mutex->mutex);
+
 		if (rc)
 		{
 			WLog_ERR(TAG, "pthread_mutex_unlock failed with %s [%d]", strerror(rc), rc);
 			return FALSE;
 		}
+
 		return TRUE;
 	}
 

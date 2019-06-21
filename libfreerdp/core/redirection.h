@@ -17,8 +17,8 @@
  * limitations under the License.
  */
 
-#ifndef __REDIRECTION_H
-#define __REDIRECTION_H
+#ifndef FREERDP_LIB_CORE_REDIRECTION_H
+#define FREERDP_LIB_CORE_REDIRECTION_H
 
 typedef struct rdp_redirection rdpRedirection;
 
@@ -30,25 +30,6 @@ typedef struct rdp_redirection rdpRedirection;
 
 #include <winpr/wlog.h>
 #include <winpr/stream.h>
-
-struct rdp_redirection
-{
-	UINT32 flags;
-	UINT32 sessionID;
-	BYTE* TsvUrl;
-	DWORD TsvUrlLength;
-	char* Username;
-	char* Domain;
-	BYTE* Password;
-	DWORD PasswordLength;
-	char* TargetFQDN;
-	BYTE* LoadBalanceInfo;
-	DWORD LoadBalanceInfoLength;
-	char* TargetNetBiosName;
-	char* TargetNetAddress;
-	UINT32 TargetNetAddressesCount;
-	char** TargetNetAddresses;
-};
 
 FREERDP_LOCAL int rdp_recv_enhanced_security_redirection_packet(rdpRdp* rdp,
         wStream* s);
@@ -65,4 +46,4 @@ FREERDP_LOCAL void redirection_free(rdpRedirection* redirection);
 #define DEBUG_REDIR(...) do { } while (0)
 #endif
 
-#endif /* __REDIRECTION_H */
+#endif /* FREERDP_LIB_CORE_REDIRECTION_H */

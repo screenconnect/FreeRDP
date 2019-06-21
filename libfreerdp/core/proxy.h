@@ -17,15 +17,16 @@
  * limitations under the License.
  */
 
-#ifndef __HTTP_PROXY_H
-#define __HTTP_PROXY_H
+#ifndef FREERDP_LIB_CORE_HTTP_PROXY_H
+#define FREERDP_LIB_CORE_HTTP_PROXY_H
 
 #include "freerdp/settings.h"
 #include <openssl/bio.h>
 
 BOOL proxy_prepare(rdpSettings* settings, const char** lpPeerHostname, UINT16* lpPeerPort,
-                   BOOL isHTTPS);
+					const char **lpProxyUsername, const char **lpProxyPassword);
 BOOL proxy_parse_uri(rdpSettings* settings, const char* uri);
-BOOL proxy_connect(rdpSettings* settings, BIO* bio, const char* hostname, UINT16 port);
+BOOL proxy_connect(rdpSettings* settings, BIO* bio, const char *proxyUsername, const char *proxyPassword,
+		const char* hostname, UINT16 port);
 
-#endif
+#endif /* FREERDP_LIB_CORE_HTTP_PROXY_H */

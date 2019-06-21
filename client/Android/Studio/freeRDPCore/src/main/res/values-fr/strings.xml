@@ -113,7 +113,6 @@
     <string name="settings_remote_program">"Lancement de programme"</string>
     <string name="settings_work_dir">"Répertoire de travail"</string>
     <string name="settings_async_channel">Async channel</string>
-    <string name="settings_async_transport">Async transport</string>
     <string name="settings_async_input">Async input</string>
     <string name="settings_async_update">Async update</string>
     <string name="settings_console_mode">"Mode console"</string>
@@ -122,6 +121,7 @@
     <string name="settings_password_empty">"Valeur non définie"</string>
     <string name="settings_cat_ui">"Interface utilisateur"</string>
     <string name="settings_ui_hide_status_bar">"Masquer la barre d'état"</string>
+    <string name="settings_ui_hide_action_bar">\"Masquer la barre d\'action\"</string>
     <string name="settings_ui_hide_zoom_controls">"Masquer les contrôles zoom"</string>
     <string name="settings_ui_swap_mouse_buttons">"Inverser les boutons de la souris"</string>
     <string name="settings_ui_invert_scrolling">"Inverser le défilement de la souris"</string>

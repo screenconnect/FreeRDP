@@ -114,7 +114,6 @@
     <string name="settings_remote_program">Extern programma</string>
     <string name="settings_work_dir">Werkmap</string>
     <string name="settings_async_channel">Async channel</string>
-    <string name="settings_async_transport">Async transport</string>
     <string name="settings_async_input">Async input</string>
     <string name="settings_async_update">Async update</string>
     <string name="settings_console_mode">Console modus</string>
@@ -123,6 +122,7 @@
     <string name="settings_password_empty">Niet ingesteld</string>
     <string name="settings_cat_ui">Gebruikersinterface</string>
     <string name="settings_ui_hide_status_bar">Verberg statusbalk</string>
+    <string name="settings_ui_hide_action_bar">Verkeersbalk verbergen</string>
     <string name="settings_ui_hide_zoom_controls">Verberg Zoom Controls</string>
     <string name="settings_ui_swap_mouse_buttons">Wissel muisknoppen</string>
     <string name="settings_ui_invert_scrolling">Scrollen omkeren</string>
